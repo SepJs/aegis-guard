@@ -1,0 +1,41 @@
+{
+  "productName": "Aegis-Guard",
+  "version": "0.1.0",
+  "identifier": "xrg.vladimir.aegis-guard",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Aegis-Guard — Vladimir Unknown",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 960,
+        "minHeight": 620,
+        "decorations": true,
+        "transparent": false,
+        "resizable": true,
+        "fullscreenEnabled": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/icon.png", "icons/icon.ico"],
+    "copyright": "Vladimir Unknown",
+    "longDescription": "Aegis-Guard endpoint security suite by Vladimir Unknown",
+    "linux": {
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"]
+      }
+    }
+  }
+}
