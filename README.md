@@ -151,7 +151,7 @@ aegis-guard/
 
 - [x] Phase 1 — Process monitoring (PAR rules) + SQLite journal + Entropy scanner
 - [x] Phase 2 — Anomalous path detection (PATH + ARG + ENV rules)
-- [ ] Phase 3 — Network observer (Go + netlink) + gRPC transport
+- [x] Phase 3 — Network observer (Go + netlink) + gRPC transport
 - [ ] Phase 4 — Response actions (Kill · Quarantine · Whitelist)
 - [ ] Phase 5 — Active defense + kill switch (with safety boundaries)
 
