@@ -1,0 +1,36 @@
+[package]
+name        = "aegis-tauri"
+version     = "0.1.0"
+edition     = "2021"
+description = "Aegis-Guard dashboard — by Vladimir Unknown"
+
+[lib]
+name       = "aegis_tauri_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+serde              = { workspace = true }
+serde_json         = { workspace = true }
+tokio              = { workspace = true }
+anyhow             = { workspace = true }
+tracing            = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid               = { workspace = true }
+chrono             = { workspace = true }
+
+# Internal crates
+ipc     = { path = "../../crates/ipc" }
+journal = { path = "../../crates/journal" }
+entropy = { path = "../../crates/entropy" }
+updater = { path = "../../crates/updater" }
+
+# Tauri 2
+tauri   = { version = "2", features = ["protocol-asset"] }
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+active-defense = { path = "../../crates/active-defense" }
+threat-intel   = { path = "../../crates/threat-intel" }
+behavioral     = { path = "../../crates/behavioral" }
+deception      = { path = "../../crates/deception" }
+self-protect   = { path = "../../crates/self-protect" }
