@@ -1,0 +1,15 @@
+[package]
+name        = "self-protect"
+version     = "0.1.0"
+edition     = "2021"
+description = "Aegis-Guard Phase 5 — self-integrity verification + tamper detection"
+
+[dependencies]
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+anyhow      = { workspace = true }
+thiserror   = { workspace = true }
+tracing     = { workspace = true }
+chrono      = { workspace = true }
+tokio       = { workspace = true }
+blake3      = { workspace = true }

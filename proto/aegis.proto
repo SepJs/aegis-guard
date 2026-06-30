@@ -1,0 +1,115 @@
+syntax = "proto3";
+
+package aegis.v1;
+
+option go_package = "github.com/SepJs/aegis-guard/network-observer/pkg/proto";
+
+// ── Shared enums ──────────────────────────────────────────────────────────────
+
+enum Confidence {
+  CONFIDENCE_UNKNOWN = 0;
+  CONFIDENCE_LOW     = 1;
+  CONFIDENCE_MEDIUM  = 2;
+  CONFIDENCE_HIGH    = 3;
+}
+
+enum EventKind {
+  EVENT_UNKNOWN   = 0;
+  EVENT_SPAWNED   = 1;
+  EVENT_EXITED    = 2;
+  EVENT_ANOMALY   = 3;
+  EVENT_NET_CONN  = 4;
+  EVENT_NET_ALERT = 5;
+}
+
+// ── Process events (from process-engine) ─────────────────────────────────────
+
+message AnomalyDetail {
+  string rule        = 1;
+  Confidence confidence = 2;
+  string reason      = 3;
+  string parent_exe  = 4;
+  repeated uint32 ancestors = 5;
+}
+
+message ProcEvent {
+  string     id         = 1;
+  EventKind  kind       = 2;
+  uint32     pid        = 3;
+  uint32     ppid       = 4;
+  string     name       = 5;
+  repeated string cmdline = 6;
+  string     exe        = 7;
+  string     cwd        = 8;
+  uint32     uid        = 9;
+  uint32     gid        = 10;
+  uint64     start_time = 11;
+  AnomalyDetail anomaly = 12;
+  int64      ts_ms      = 13;
+}
+
+// ── Network events (from network-observer) ────────────────────────────────────
+
+enum Protocol {
+  PROTOCOL_UNKNOWN = 0;
+  PROTOCOL_TCP     = 1;
+  PROTOCOL_UDP     = 2;
+}
+
+enum Direction {
+  DIRECTION_UNKNOWN  = 0;
+  DIRECTION_OUTBOUND = 1;
+  DIRECTION_INBOUND  = 2;
+}
+
+message NetEndpoint {
+  string ip   = 1;
+  uint32 port = 2;
+}
+
+message NetAlert {
+  string rule        = 1;
+  Confidence confidence = 2;
+  string reason      = 3;
+  // Which network rule category triggered (NET, DNS, TLS)
+  string category    = 4;
+}
+
+message NetEvent {
+  string      id        = 1;
+  EventKind   kind      = 2;
+  uint32      pid       = 3;
+  string      process   = 4;
+  Protocol    protocol  = 5;
+  Direction   direction = 6;
+  NetEndpoint local     = 7;
+  NetEndpoint remote    = 8;
+  // Bytes transferred (cumulative per connection)
+  uint64      bytes_tx  = 9;
+  uint64      bytes_rx  = 10;
+  NetAlert    alert     = 11;
+  int64       ts_ms     = 12;
+}
+
+// ── Services ──────────────────────────────────────────────────────────────────
+
+// ProcessEngineService — streamed from Rust process-engine → Tauri gRPC backend
+service ProcessEngineService {
+  // Bidirectional: client subscribes, server streams events
+  rpc StreamEvents(StreamRequest) returns (stream ProcEvent);
+}
+
+// NetworkObserverService — streamed from Go observer → Tauri gRPC backend  
+service NetworkObserverService {
+  rpc StreamNetEvents(StreamRequest) returns (stream NetEvent);
+  // Health check
+  rpc Ping(PingRequest) returns (PingResponse);
+}
+
+message StreamRequest {
+  // Optional filter — empty means all events including clean ones
+  bool anomalies_only = 1;
+}
+
+message PingRequest  { string client_id = 1; }
+message PingResponse { string server_id = 1; int64 ts_ms = 2; }

@@ -1,0 +1,10 @@
+[
+  {"ioc":"198.199.73.244","kind":"ip","feed":"bundled","threat_type":"c2_server","confidence":90,"added_ts":0},
+  {"ioc":"45.33.32.156","kind":"ip","feed":"bundled","threat_type":"malware_host","confidence":85,"added_ts":0},
+  {"ioc":"23.239.9.123","kind":"ip","feed":"bundled","threat_type":"c2_server","confidence":88,"added_ts":0},
+  {"ioc":"evil.example.com","kind":"domain","feed":"bundled","threat_type":"phishing","confidence":95,"added_ts":0},
+  {"ioc":"malware.example.net","kind":"domain","feed":"bundled","threat_type":"malware_download","confidence":92,"added_ts":0},
+  {"ioc":"cobalt-strike.bad","kind":"domain","feed":"bundled","threat_type":"c2_beacon","confidence":97,"added_ts":0},
+  {"ioc":"44d88612fea8a8f36de82e1278abb02f","kind":"md5","feed":"bundled","threat_type":"ransomware","confidence":99,"added_ts":0},
+  {"ioc":"275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f","kind":"sha256","feed":"bundled","threat_type":"trojan","confidence":99,"added_ts":0}
+]
