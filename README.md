@@ -34,7 +34,7 @@ Aegis-Guard is a modular, behavioral endpoint security suite for Linux. It goes 
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  /proc filesystem  ·  /proc/net  ·  kernel ≥ 4.9           │
+│  /proc filesystem  ·  /proc/net  ·  kernel ≥ 4.9            │
 └───────┬────────────────────────┬────────────────────────────┘
         │ poll 250ms             │ poll 500ms
         ▼                        ▼
@@ -53,16 +53,16 @@ Aegis-Guard is a modular, behavioral endpoint security suite for Linux. It goes 
         ▼                       ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    Tauri 2 Backend (Rust)                   │
-│  IPC bridge  ·  Net bridge  ·  Phase 5 bridge              │
-│  SQLite journal (BLAKE3)  ·  Response engine               │
-│  Threat Intel  ·  Behavioral  ·  Self-protect  ·  Canary   │
+│  IPC bridge  ·  Net bridge  ·  Phase 5 bridge               │
+│  SQLite journal (BLAKE3)  ·  Response engine                │
+│  Threat Intel  ·  Behavioral  ·  Self-protect  ·  Canary    │
 └───────────────────────────┬─────────────────────────────────┘
                             │ Tauri events
                             ▼
 ┌─────────────────────────────────────────────────────────────┐
 │              Dashboard — React 18 · TypeScript              │
-│  Processes  ·  Journal  ·  Forensics  ·  Debug             │
-│  Audit Log  ·  Threat Intel  ·  Canary Tokens              │
+│  Processes  ·  Journal  ·  Forensics  ·  Debug              │
+│  Audit Log  ·  Threat Intel  ·  Canary Tokens               │
 └─────────────────────────────────────────────────────────────┘
 ```
 
