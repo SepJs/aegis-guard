@@ -67,7 +67,7 @@ fn main() -> anyhow::Result<()> {
 fn print_banner() {
     println!("{}{}", VIOLET, BOLD);
     println!("  ╔═══════════════════════════════════════════╗");
-    println!("  ║     AEGIS-GUARD  INSTALLER  v0.1.0       ║");
+    println!("  ║     AEGIS-GUARD  INSTALLER  v0.1.0        ║");
     println!("  ║     by Vladimir Unknown                   ║");
     println!("  ║     Endpoint Security Suite               ║");
     println!("  ╚═══════════════════════════════════════════╝");
