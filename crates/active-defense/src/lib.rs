@@ -84,9 +84,12 @@ impl ResponseEngine {
             ActionKind::Whitelist => {
                 self.whitelist.add(req.pid, req.process_name.clone(), req.exe_path.clone())
                     .map_err(|e| ResponseError::ExecutionFailed(e.to_string()))?;
-                Ok(ActionResult::success(req.pid, ActionKind::Whitelist,
+                ActionResult::success(
+                    req.pid,
+                    ActionKind::Whitelist,
                     format!("Process '{}' (pid {}) added to whitelist",
-                        req.process_name, req.pid)))
+                        req.process_name, req.pid),
+                )
             }
         };
 

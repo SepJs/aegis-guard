@@ -18,19 +18,21 @@ tracing-subscriber = { workspace = true }
 uuid               = { workspace = true }
 chrono             = { workspace = true }
 
-# Internal crates
-ipc     = { path = "../../crates/ipc" }
-journal = { path = "../../crates/journal" }
-entropy = { path = "../../crates/entropy" }
-updater = { path = "../../crates/updater" }
-
-# Tauri 2
-tauri   = { version = "2", features = ["protocol-asset"] }
-
-[build-dependencies]
-tauri-build = { version = "2", features = [] }
+# Internal crates — Phase 1-4
+ipc            = { path = "../../crates/ipc" }
+journal        = { path = "../../crates/journal" }
+entropy        = { path = "../../crates/entropy" }
+updater        = { path = "../../crates/updater" }
 active-defense = { path = "../../crates/active-defense" }
+
+# Internal crates — Phase 5
 threat-intel   = { path = "../../crates/threat-intel" }
 behavioral     = { path = "../../crates/behavioral" }
 deception      = { path = "../../crates/deception" }
 self-protect   = { path = "../../crates/self-protect" }
+
+# Tauri 2
+tauri          = { version = "2" }
+
+[build-dependencies]
+tauri-build    = { version = "2", features = [] }

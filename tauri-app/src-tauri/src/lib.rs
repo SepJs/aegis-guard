@@ -7,7 +7,7 @@ mod phase5_bridge;
 mod state;
 
 use std::sync::{Arc, Mutex};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -39,7 +39,7 @@ pub fn run() {
 
             let state = Arc::new(AppState {
                 journal:         Mutex::new(journal),
-                response_engine: Mutex::new(engine),
+                response_engine: engine,
             });
             app.manage(state.clone());
 

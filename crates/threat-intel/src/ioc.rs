@@ -2,7 +2,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
-use std::str::FromStr;
 use std::sync::RwLock;
 
 use anyhow::Result;
@@ -10,7 +9,6 @@ use ipnet::IpNet;
 
 use crate::models::ThreatEntry;
 
-/// In-memory IOC store.
 pub struct IocStore {
     ips:     RwLock<HashMap<IpAddr, ThreatEntry>>,
     cidrs:   RwLock<Vec<(IpNet, ThreatEntry)>>,
@@ -32,7 +30,6 @@ impl IocStore {
         }
     }
 
-    /// Ingest a batch of threat entries.
     pub fn ingest(&self, entries: Vec<ThreatEntry>) -> Result<usize> {
         let mut count = 0usize;
         for e in entries {
@@ -73,8 +70,8 @@ impl IocStore {
 
     pub fn check_ip(&self, ip: &IpAddr) -> Option<ThreatEntry> {
         // Exact match first
-        if let Some(e) = self.ips.read().unwrap().get(ip) {
-            return Some(e.clone());
+        if let Some(e) = self.ips.read().unwrap().get(ip).cloned() {
+            return Some(e);
         }
         // CIDR range match
         for (net, entry) in self.cidrs.read().unwrap().iter() {
@@ -88,13 +85,13 @@ impl IocStore {
     pub fn check_domain(&self, domain: &str) -> Option<ThreatEntry> {
         let key = domain.to_lowercase();
         // Exact match
-        if let Some(e) = self.domains.read().unwrap().get(&key) {
-            return Some(e.clone());
+        if let Some(e) = self.domains.read().unwrap().get(&key).cloned() {
+            return Some(e);
         }
-        // Subdomain match: check if domain ends with any known bad domain
+        // Subdomain match
         let domains = self.domains.read().unwrap();
         for (bad, entry) in domains.iter() {
-            if key.ends_with(&format!(".{}", bad)) || key == bad.as_str() {
+            if key.ends_with(&format!(".{}", bad)) {
                 return Some(entry.clone());
             }
         }
@@ -103,9 +100,11 @@ impl IocStore {
 
     pub fn check_hash(&self, hash: &str) -> Option<ThreatEntry> {
         let h = hash.to_lowercase();
-        self.sha256.read().unwrap().get(&h)
-            .or_else(|| self.md5.read().unwrap().get(&h))
-            .cloned()
+        // Check SHA256 first — each lock released before next acquired
+        if let Some(e) = self.sha256.read().unwrap().get(&h).cloned() {
+            return Some(e);
+        }
+        self.md5.read().unwrap().get(&h).cloned()
     }
 
     pub fn stats(&self) -> IocStats {
@@ -113,12 +112,15 @@ impl IocStore {
             ips:     self.ips.read().unwrap().len(),
             cidrs:   self.cidrs.read().unwrap().len(),
             domains: self.domains.read().unwrap().len(),
-            hashes:  self.sha256.read().unwrap().len() + self.md5.read().unwrap().len(),
+            hashes:  self.sha256.read().unwrap().len()
+                   + self.md5.read().unwrap().len(),
         }
     }
 }
 
-impl Default for IocStore { fn default() -> Self { Self::new() } }
+impl Default for IocStore {
+    fn default() -> Self { Self::new() }
+}
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct IocStats {

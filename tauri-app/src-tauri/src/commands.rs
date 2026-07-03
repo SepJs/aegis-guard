@@ -1,15 +1,25 @@
-// commands.rs — all Tauri commands (journal + entropy + updater + Phase 4 active defense)
+// commands.rs — all Tauri commands (journal + entropy + updater + Phase 4 active defense + Phase 5)
+//
+// `state.journal.lock()` is used only inside synchronous fns, never across
+// an .await, so std::sync::MutexGuard's lack of Send is never a problem there.
+//
+// `state.response_engine` is called directly with NO .lock() — see state.rs
+// for why. This is what fixes execute_action's "future cannot be sent
+// between threads safely" error.
 
 use std::sync::Arc;
 use tauri::State;
 
 use active_defense::{
     audit::AuditEntry,
-    models::{ActionKind, ActionRequest, ActionResult, ResponseError},
+    models::{ActionKind, ActionRequest, ActionResult},
     whitelist::WhitelistEntry,
 };
+use deception::canary::CanaryToken;
 use entropy::models::{ScanRequest, ScanSummary};
 use journal::export;
+use threat_intel::ioc::IocStats;
+use threat_intel::models::IocMatch;
 use updater::UpdateInfo;
 
 use crate::state::AppState;
@@ -81,17 +91,11 @@ pub async fn check_update() -> Res<UpdateInfo> {
 
 // ── Phase 4: Active Defense commands ─────────────────────────────────────────
 
-/// Generate a challenge token for a destructive action.
-/// The UI displays this to the user; they must retype it to confirm.
-/// Prevents accidental triggers and replay attacks.
 #[tauri::command]
 pub fn generate_challenge(pid: u32, action: String) -> Res<String> {
-    // Challenge is "CONFIRM-{ACTION}-{PID}" — user must type this exactly
     Ok(format!("CONFIRM-{}-{}", action.to_uppercase(), pid))
 }
 
-/// Execute an active defense action (kill / quarantine / whitelist).
-/// Requires a valid challenge token matching what generate_challenge returned.
 #[tauri::command]
 pub async fn execute_action(
     pid:          u32,
@@ -103,7 +107,6 @@ pub async fn execute_action(
     note:         String,
     state:        State<'_, Arc<AppState>>,
 ) -> Res<ActionResult> {
-    // Validate challenge token
     let expected = format!("CONFIRM-{}-{}", action.to_uppercase(), pid);
     if challenge.trim() != expected {
         return Err(format!(
@@ -130,53 +133,41 @@ pub async fn execute_action(
         note,
     };
 
-    let engine = state.response_engine.lock().map_err(je)?;
-    engine.execute(req).await.map_err(|e| e.to_string())
+    // No .lock() — response_engine is Send + Sync on its own, so this
+    // .await can safely cross thread boundaries.
+    state.response_engine.execute(req).await.map_err(|e| e.to_string())
 }
 
-/// Fetch the audit log (active defense action history).
 #[tauri::command]
 pub fn list_audit_log(
     limit: u32, offset: u32,
     state: State<'_, Arc<AppState>>,
 ) -> Res<Vec<AuditEntry>> {
-    let engine  = state.response_engine.lock().map_err(je)?;
-    engine.audit_log().list(limit, offset).map_err(je)
+    state.response_engine.audit_log().list(limit, offset).map_err(je)
 }
 
-/// Verify the BLAKE3 audit chain integrity.
 #[tauri::command]
 pub fn verify_audit_chain(state: State<'_, Arc<AppState>>) -> Res<Vec<String>> {
-    let engine = state.response_engine.lock().map_err(je)?;
-    engine.audit_log().verify_chain().map_err(je)
+    state.response_engine.audit_log().verify_chain().map_err(je)
 }
 
-/// List whitelisted processes.
 #[tauri::command]
 pub fn list_whitelist(state: State<'_, Arc<AppState>>) -> Res<Vec<WhitelistEntry>> {
-    let engine = state.response_engine.lock().map_err(je)?;
-    Ok(engine.whitelist().list())
+    Ok(state.response_engine.whitelist().list())
 }
 
-/// Remove a process from the whitelist by PID.
 #[tauri::command]
 pub fn remove_from_whitelist(
     pid:   u32,
     state: State<'_, Arc<AppState>>,
 ) -> Res<bool> {
-    let engine = state.response_engine.lock().map_err(je)?;
-    engine.whitelist().remove(pid).map_err(je)
+    state.response_engine.whitelist().remove(pid).map_err(je)
 }
 
 // ── Phase 5: Threat Intel + Canary + Behavioral commands ─────────────────────
 
-use threat_intel::ioc::IocStats;
-use threat_intel::models::IocMatch;
-use deception::canary::CanaryToken;
-
 #[tauri::command]
 pub fn get_ioc_stats() -> Res<IocStats> {
-    // ThreatMatcher is created fresh for stats (it's cheap — bundled feed only)
     threat_intel::ThreatMatcher::new()
         .map(|m| m.stats())
         .map_err(je)
@@ -185,7 +176,6 @@ pub fn get_ioc_stats() -> Res<IocStats> {
 #[tauri::command]
 pub fn check_ioc_manual(value: String, context: String) -> Res<Option<IocMatch>> {
     let matcher = threat_intel::ThreatMatcher::new().map_err(je)?;
-    // Try IP first, then domain, then hash
     if let Some(m) = matcher.check_ip(&value, &context) { return Ok(Some(m)); }
     if let Some(m) = matcher.check_domain(&value, &context) { return Ok(Some(m)); }
     if let Some(m) = matcher.check_hash(&value, &context) { return Ok(Some(m)); }
@@ -212,7 +202,7 @@ pub fn delete_canary(id: String) -> Res<bool> {
 }
 
 #[tauri::command]
-pub fn get_behavioral_stats(state: State<'_, Arc<AppState>>) -> Res<serde_json::Value> {
+pub fn get_behavioral_stats(_state: State<'_, Arc<AppState>>) -> Res<serde_json::Value> {
     Ok(serde_json::json!({
         "status": "active",
         "description": "Behavioral baseline engine running — collecting /proc observations every 5s",

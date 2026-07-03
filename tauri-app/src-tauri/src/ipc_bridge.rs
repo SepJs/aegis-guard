@@ -7,7 +7,7 @@ use tauri::{AppHandle, Emitter};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use ipc::{reader::IpcReader, DEFAULT_SOCKET_PATH};
+use ipc::reader::IpcReader;
 use journal::models::{Severity, ThreatIncident};
 use crate::state::AppState;
 

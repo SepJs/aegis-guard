@@ -8,8 +8,7 @@
 
 use anyhow::{Context, Result};
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::models::{IocKind, ThreatEntry};
 use crate::ioc::IocStore;
@@ -25,15 +24,6 @@ pub fn load_bundled(store: &IocStore) -> Result<usize> {
     let count = store.ingest(entries)?;
     info!("bundled IOC feed loaded: {} entries", count);
     Ok(count)
-}
-
-/// URLhaus response shape (abbreviated).
-#[derive(Deserialize)]
-struct UrlhausEntry {
-    url:        Option<String>,
-    host:       Option<String>,
-    threat:     Option<String>,
-    tags:       Option<Vec<String>>,
 }
 
 /// Fetch Abuse.ch URLhaus feed and ingest into store.

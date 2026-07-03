@@ -5,15 +5,20 @@
 // This makes the log tamper-evident — any modification breaks the chain.
 //
 // Stored in SQLite at /var/lib/aegis/audit.db
+//
+// rusqlite::Connection is Send but NOT Sync (it uses RefCell internally for
+// its prepared-statement cache), so it must be wrapped in a Mutex before
+// AuditLog can be placed behind an Arc and shared across async tasks.
 
 use std::path::Path;
+use std::sync::{Mutex, MutexGuard};
 
 use anyhow::{Context, Result};
 use chrono::Utc;
 use rusqlite::{params, Connection};
 use uuid::Uuid;
 
-use crate::models::{ActionKind, ActionRequest};
+use crate::models::ActionRequest;
 
 const SCHEMA: &str = "
 PRAGMA journal_mode = WAL;
@@ -38,7 +43,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts_before DESC);
 ";
 
 pub struct AuditLog {
-    conn: Connection,
+    conn: Mutex<Connection>,
 }
 
 impl AuditLog {
@@ -50,18 +55,25 @@ impl AuditLog {
         let conn = Connection::open(path)
             .context("open audit db")?;
         conn.execute_batch(SCHEMA)?;
-        Ok(Self { conn })
+        Ok(Self { conn: Mutex::new(conn) })
+    }
+
+    /// Lock the connection, recovering from a poisoned mutex rather than
+    /// panicking — a panic during one audit write should not take down
+    /// every subsequent audit read/write for the life of the process.
+    fn conn(&self) -> MutexGuard<'_, Connection> {
+        self.conn.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     /// Record an action BEFORE it executes. Returns the audit entry ID.
     pub fn record_before(&self, req: &ActionRequest) -> Result<String> {
-        let id      = Uuid::new_v4().to_string();
-        let ts      = Utc::now().timestamp_millis();
-        let action  = format!("{:?}", req.kind);
-        let prev    = self.last_digest().unwrap_or_default();
-        let digest  = compute_chain_digest(&prev, &id, &action, req.pid, ts);
+        let id     = Uuid::new_v4().to_string();
+        let ts     = Utc::now().timestamp_millis();
+        let action = format!("{:?}", req.kind);
+        let prev   = self.last_digest().unwrap_or_default();
+        let digest = compute_chain_digest(&prev, &id, &action, req.pid, ts);
 
-        self.conn.execute(
+        self.conn().execute(
             "INSERT INTO audit_log
              (id, action, pid, process, incident_id, note,
               status, ts_before, prev_digest, digest)
@@ -83,7 +95,7 @@ impl AuditLog {
     /// Update the audit entry AFTER execution with outcome.
     pub fn record_after(&self, id: &str, success: bool, outcome: &str) -> Result<()> {
         let status = if success { "success" } else { "failed" };
-        self.conn.execute(
+        self.conn().execute(
             "UPDATE audit_log SET status=?1, outcome=?2, ts_after=?3 WHERE id=?4",
             params![status, outcome, Utc::now().timestamp_millis(), id],
         )?;
@@ -92,7 +104,8 @@ impl AuditLog {
 
     /// Fetch audit entries, newest first.
     pub fn list(&self, limit: u32, offset: u32) -> Result<Vec<AuditEntry>> {
-        let mut stmt = self.conn.prepare(
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
             "SELECT id, action, pid, process, incident_id, note,
                     status, outcome, ts_before, ts_after, prev_digest, digest
              FROM audit_log
@@ -137,7 +150,7 @@ impl AuditLog {
     }
 
     fn last_digest(&self) -> Option<String> {
-        self.conn.query_row(
+        self.conn().query_row(
             "SELECT digest FROM audit_log ORDER BY ts_before DESC LIMIT 1",
             [], |row| row.get(0),
         ).ok()
@@ -161,11 +174,11 @@ pub struct AuditEntry {
 }
 
 fn compute_chain_digest(
-    prev:    &str,
-    id:      &str,
-    action:  &str,
-    pid:     u32,
-    ts:      i64,
+    prev:   &str,
+    id:     &str,
+    action: &str,
+    pid:    u32,
+    ts:     i64,
 ) -> String {
     let mut h = blake3::Hasher::new();
     h.update(prev.as_bytes());

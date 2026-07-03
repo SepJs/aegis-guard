@@ -80,3 +80,29 @@ init-custom-iocs:
 ]
 JSON
 	@echo "Custom IOC file created at /var/lib/aegis/custom_iocs.json"
+
+# ── Quick run scripts ──────────────────────────────────────────────────────────
+run-engine:
+	bash run-engine.sh
+
+run-observer:
+	bash run-observer.sh
+
+run-dashboard:
+	bash run-dashboard.sh
+
+run-dashboard-net:
+	AEGIS_NET=1 bash run-dashboard.sh
+
+# ── Installer wizard ───────────────────────────────────────────────────────────
+installer:
+	source $$HOME/.cargo/env && \
+	cargo build --release -p aegis-installer && \
+	./target/release/aegis-installer
+
+# ── Release tag ───────────────────────────────────────────────────────────────
+tag:
+	@read -p "Version (e.g. v0.1.0): " v && \
+	git tag $$v && \
+	git push origin $$v && \
+	echo "Release tag $$v pushed — GitHub Actions will build all platforms"

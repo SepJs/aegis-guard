@@ -2,10 +2,9 @@
 
 use std::time::Duration;
 
-use anyhow::Result;
 use chrono::Utc;
 use tokio::sync::mpsc;
-use tracing::{info, warn};
+use tracing::info;
 use uuid::Uuid;
 
 use crate::models::{SelfProtectEvent, SelfProtectKind};
@@ -40,7 +39,7 @@ impl IntegrityMonitor {
 
 async fn socket_journal_monitor(tx: mpsc::Sender<SelfProtectEvent>) {
     // Capture baseline permissions on startup
-    let socket_meta  = std::fs::metadata(SOCKET_PATH).ok();
+    let _socket_meta  = std::fs::metadata(SOCKET_PATH).ok();
     let journal_hash = hash_file_if_exists(JOURNAL_PATH);
 
     let mut interval = tokio::time::interval(Duration::from_secs(CHECK_INTERVAL));

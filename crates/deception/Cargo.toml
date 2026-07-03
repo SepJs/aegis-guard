@@ -13,5 +13,7 @@ tracing     = { workspace = true }
 chrono      = { workspace = true }
 uuid        = { workspace = true }
 tokio       = { workspace = true }
+blake3      = { workspace = true }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 nix = { version = "0.29", features = ["signal","process","fs"] }

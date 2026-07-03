@@ -4,7 +4,6 @@
 // The whitelist is persisted as a BLAKE3-signed JSON file.
 // Adding to the whitelist is permanent until manually removed.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 

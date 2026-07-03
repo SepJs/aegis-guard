@@ -7,11 +7,10 @@
 use std::collections::HashMap;
 use std::fs;
 use std::sync::RwLock;
-use std::time::Duration;
 
 use anyhow::Result;
 use chrono::Utc;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use crate::models::{BehaviorAnomaly, ProcessBaseline, ProcessObservation};
 use crate::scorer::score_observation;
@@ -21,9 +20,6 @@ const MIN_SAMPLES_FOR_DETECTION: u64 = 30;
 
 /// Z-score threshold above which we emit a behavioral anomaly.
 const ANOMALY_Z_THRESHOLD: f64 = 3.5;
-
-/// How often to sample /proc for observations (seconds).
-const SAMPLE_INTERVAL_SECS: u64 = 5;
 
 pub struct BehaviorEngine {
     baselines:  RwLock<HashMap<String, ProcessBaseline>>,

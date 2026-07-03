@@ -88,10 +88,7 @@ impl ThreatMatcher {
     /// Hash a file and check against threat intel.
     pub fn check_file(&self, path: &str) -> Option<IocMatch> {
         let data = std::fs::read(path).ok()?;
-        // Compute SHA256
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        // Use blake3 as SHA256 substitute for speed (real impl would use sha2 crate)
+        // Use BLAKE3 as a fast file fingerprint for hash matching
         let hash = blake3::hash(&data).to_hex().to_string();
         self.check_hash(&hash, &format!("file:{}", path))
     }
