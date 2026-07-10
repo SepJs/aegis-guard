@@ -14,9 +14,8 @@ chrono      = { workspace = true }
 uuid        = { workspace = true }
 blake3      = { workspace = true }
 tokio       = { workspace = true }
+rusqlite    = { version = "0.31", features = ["bundled"] }
+once_cell   = "1"
 
-# Linux-specific: nix crate for signal sending and namespace ops
 [target.'cfg(target_os = "linux")'.dependencies]
 nix = { version = "0.29", features = ["signal", "process", "fs", "user"] }
-rusqlite   = { version = "0.31", features = ["bundled"] }
-once_cell  = "1"

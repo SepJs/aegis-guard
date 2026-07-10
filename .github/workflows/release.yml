@@ -1,79 +1,25 @@
-# .github/workflows/release.yml
-# Aegis-Guard cross-platform release builder
-# by Vladimir Unknown
-#
-# Triggers on git tag: git tag v0.1.0 && git push --tags
-# Produces:
-#   Linux:   .deb + .rpm + .AppImage + aegis-network-observer binary
-#   Windows: .msi + NSIS .exe
-#   macOS:   .dmg + .app
-
 name: Release
-
 on:
-  push:
-    tags: ["v*"]
-
-env:
-  CARGO_TERM_COLOR: always
+  push: { tags: ["v*"] }
 
 jobs:
-  # ── Linux build ─────────────────────────────────────────────────────────────
   build-linux:
-    name: Build — Linux
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev libgtk-3-dev \
-            libayatana-appindicator3-dev libssl-dev \
-            patchelf librsvg2-dev golang-go \
-            --fix-missing
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust deps
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: linux-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: tauri-app/package-lock.json
-
-      - name: Install npm deps
-        run: cd tauri-app && npm ci
-
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2.0" --locked
-
-      - name: Build Linux bundles (deb + rpm + AppImage)
-        run: cd tauri-app && cargo tauri build
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-
-      - name: Build process engine
-        run: cargo build --release -p process-engine
-
-      - name: Build network observer (Go)
-        run: |
-          cd network-observer
-          go build -o ../target/release/aegis-network-observer ./cmd/observer
-
-      - name: Upload Linux artifacts
-        uses: actions/upload-artifact@v4
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev libssl-dev patchelf librsvg2-dev golang-go --fix-missing
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with: { node-version: "20", cache: "npm", cache-dependency-path: tauri-app/package-lock.json }
+      - run: cd tauri-app && npm ci
+      - run: cargo install tauri-cli --version "^2.0" --locked
+      - run: cd tauri-app && cargo tauri build
+      - run: cargo build --release -p process-engine
+      - run: cd network-observer && go build -o ../target/release/aegis-network-observer ./cmd/observer
+      - uses: actions/upload-artifact@v4
         with:
           name: linux-bundles
           path: |
@@ -83,152 +29,16 @@ jobs:
             target/release/aegis-process-engine
             target/release/aegis-network-observer
 
-  # ── Windows build ────────────────────────────────────────────────────────────
-  build-windows:
-    name: Build — Windows
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust deps
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: windows-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Install npm deps
-        run: cd tauri-app && npm ci
-
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2.0" --locked
-
-      - name: Build Windows bundles (msi + nsis)
-        # Exclude Linux-only crates
-        run: |
-          cd tauri-app
-          cargo tauri build
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-
-      - name: Upload Windows artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-bundles
-          path: |
-            tauri-app/src-tauri/target/release/bundle/msi/*.msi
-            tauri-app/src-tauri/target/release/bundle/nsis/*.exe
-
-  # ── macOS build ──────────────────────────────────────────────────────────────
-  build-macos:
-    name: Build — macOS
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Rust (with Apple Silicon target)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
-
-      - name: Cache Rust deps
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: macos-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Install npm deps
-        run: cd tauri-app && npm ci
-
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2.0" --locked
-
-      - name: Build macOS universal bundle (Intel + Apple Silicon)
-        run: |
-          cd tauri-app
-          cargo tauri build --target universal-apple-darwin
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          APPLE_CERTIFICATE:         ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY:    ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID:                  ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD:            ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID:             ${{ secrets.APPLE_TEAM_ID }}
-
-      - name: Upload macOS artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-bundles
-          path: |
-            tauri-app/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
-            tauri-app/src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app
-
-  # ── Release: attach all artifacts ────────────────────────────────────────────
   release:
-    name: Create GitHub Release
-    needs: [build-linux, build-windows, build-macos]
+    needs: [build-linux]
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    permissions: { contents: write }
     steps:
       - uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: release-artifacts
-
-      - name: Create release
-        uses: softprops/action-gh-release@v2
+      - uses: actions/download-artifact@v4
+        with: { path: release-artifacts }
+      - uses: softprops/action-gh-release@v2
         with:
           name: "Aegis-Guard ${{ github.ref_name }} — by Vladimir Unknown"
-          body: |
-            ## Aegis-Guard ${{ github.ref_name }}
-
-            **by Vladimir Unknown** — Endpoint Security Suite
-
-            ### Downloads
-
-            | Platform | File | Notes |
-            |----------|------|-------|
-            | Linux (Debian/Ubuntu) | `.deb` | `sudo dpkg -i aegis-guard_*.deb` |
-            | Linux (Fedora/RHEL)   | `.rpm` | `sudo rpm -i aegis-guard-*.rpm` |
-            | Linux (Universal)     | `.AppImage` | `chmod +x *.AppImage && ./*.AppImage` |
-            | Windows               | `.msi` | Double-click to install |
-            | Windows (portable)    | `.exe` | NSIS installer |
-            | macOS (Universal)     | `.dmg` | Supports Intel + Apple Silicon |
-
-            ### Linux: additional binaries
-            - `aegis-process-engine` — run with `sudo` (needs /proc access)
-            - `aegis-network-observer` — run with `sudo` (needs /proc/net access)
-
-            ### Notes
-            - Process monitoring (PAR/PATH/ARG/ENV rules) is **Linux only**
-            - Windows/macOS get: Dashboard + Entropy scanner + Threat Intel + Canary
-            - See `README.md` for full documentation
-
-          files: |
-            release-artifacts/linux-bundles/**
-            release-artifacts/windows-bundles/**
-            release-artifacts/macos-bundles/**
+          files: release-artifacts/linux-bundles/**
           draft: false
-          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') }}

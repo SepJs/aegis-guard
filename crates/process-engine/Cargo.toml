@@ -18,9 +18,5 @@ tracing            = { workspace = true }
 tracing-subscriber = { workspace = true }
 chrono             = { workspace = true }
 uuid               = { workspace = true }
-
-# /proc abstraction — distro-agnostic
-procfs = "0.17"
-
-# IPC — sibling workspace crate
-ipc = { path = "../ipc" }
+procfs             = "0.17"
+ipc                = { path = "../ipc" }

@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Aegis-Guard — Linux setup script (Phase 4)
-# Run once as root before starting any component.
-# Compatible with all systemd-based distros.
+# Aegis-Guard — system setup (systemd services). By Vladimir Unknown.
+# For a quick one-shot run without systemd, use ../aegis.sh instead.
 
 set -euo pipefail
 
@@ -16,16 +15,16 @@ info()  { echo -e "${GREEN}[aegis]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[aegis]${NC} $*"; }
 error() { echo -e "${RED}[aegis]${NC} $*" >&2; exit 1; }
 
-[[ $EUID -eq 0 ]] || error "Run as root: sudo ./setup.sh"
+[[ $EUID -eq 0 ]] || error "Run as root: sudo bash install/setup.sh"
 
-# ── Directories ───────────────────────────────────────────────────────────────
 info "Creating runtime directories..."
-install -d -m 750 "$SOCKET_DIR"
-install -d -m 750 "$DATA_DIR"
-install -d -m 750 "$QUARANTINE_DIR"
-chown root:root "$SOCKET_DIR" "$DATA_DIR" "$QUARANTINE_DIR"
+install -d -m 1777 "$SOCKET_DIR"     # 1777: sticky + world-writable, like /tmp —
+                                       # lets the non-root dashboard bind the IPC
+                                       # socket while root (engine) can still connect.
+install -d -m 750  "$DATA_DIR"
+install -d -m 750  "$QUARANTINE_DIR"
+chown root:root "$DATA_DIR" "$QUARANTINE_DIR"
 
-# ── Binaries ──────────────────────────────────────────────────────────────────
 if [[ -f ./target/release/aegis-process-engine ]]; then
     info "Installing process engine binary..."
     install -m 755 ./target/release/aegis-process-engine "$BIN_DIR/"
@@ -40,7 +39,6 @@ else
     warn "Network observer not found — run: cd network-observer && go build -o ../target/aegis-network-observer ./cmd/observer"
 fi
 
-# ── systemd: Process Engine ───────────────────────────────────────────────────
 info "Installing systemd service: aegis-process-engine..."
 cat > "$SYSTEMD_DIR/aegis-process-engine.service" << 'UNIT'
 [Unit]
@@ -57,8 +55,6 @@ Environment=AEGIS_LOG=info
 Environment=AEGIS_SOCKET=/run/aegis/proc.sock
 User=root
 Group=root
-RuntimeDirectory=aegis
-StateDirectory=aegis
 ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=true
@@ -68,7 +64,6 @@ NoNewPrivileges=true
 WantedBy=multi-user.target
 UNIT
 
-# ── systemd: Network Observer ─────────────────────────────────────────────────
 info "Installing systemd service: aegis-network-observer..."
 cat > "$SYSTEMD_DIR/aegis-network-observer.service" << 'UNIT'
 [Unit]
@@ -92,11 +87,14 @@ UNIT
 systemctl daemon-reload
 
 info ""
-info "Setup complete. Phase 5 — Full Stack enabled."
+info "Setup complete."
 info ""
 info "Start services:"
 info "  systemctl start aegis-process-engine"
 info "  systemctl start aegis-network-observer"
 info ""
-info "Run dashboard (terminal):"
+info "Run dashboard (as your normal user, NOT root):"
 info "  cd tauri-app && AEGIS_NET=1 cargo tauri dev"
+info ""
+info "Or for a one-shot run of everything together:"
+info "  bash aegis.sh"

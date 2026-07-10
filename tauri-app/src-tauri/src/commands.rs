@@ -1,12 +1,3 @@
-// commands.rs — all Tauri commands (journal + entropy + updater + Phase 4 active defense + Phase 5)
-//
-// `state.journal.lock()` is used only inside synchronous fns, never across
-// an .await, so std::sync::MutexGuard's lack of Send is never a problem there.
-//
-// `state.response_engine` is called directly with NO .lock() — see state.rs
-// for why. This is what fixes execute_action's "future cannot be sent
-// between threads safely" error.
-
 use std::sync::Arc;
 use tauri::State;
 
@@ -30,46 +21,34 @@ fn je(e: impl std::fmt::Display) -> String { e.to_string() }
 // ── Journal commands ──────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub fn list_incidents(
-    limit: u32, offset: u32,
-    state: State<'_, Arc<AppState>>,
-) -> Res<Vec<journal::models::ThreatIncident>> {
-    state.journal.lock().map_err(je)?
-        .list_incidents(limit, offset).map_err(je)
+pub fn list_incidents(limit: u32, offset: u32, state: State<'_, Arc<AppState>>) -> Res<Vec<journal::models::ThreatIncident>> {
+    state.journal.lock().map_err(je)?.list_incidents(limit, offset).map_err(je)
 }
 
 #[tauri::command]
-pub fn list_debug_log(
-    limit: u32, offset: u32,
-    state: State<'_, Arc<AppState>>,
-) -> Res<Vec<journal::models::DebugEntry>> {
-    state.journal.lock().map_err(je)?
-        .list_debug(limit, offset).map_err(je)
+pub fn list_debug_log(limit: u32, offset: u32, state: State<'_, Arc<AppState>>) -> Res<Vec<journal::models::DebugEntry>> {
+    state.journal.lock().map_err(je)?.list_debug(limit, offset).map_err(je)
 }
 
 #[tauri::command]
 pub fn resolve_incident(id: String, state: State<'_, Arc<AppState>>) -> Res<()> {
-    state.journal.lock().map_err(je)?
-        .resolve_incident(&id).map_err(je)
+    state.journal.lock().map_err(je)?.resolve_incident(&id).map_err(je)
 }
 
 #[tauri::command]
 pub fn count_open(state: State<'_, Arc<AppState>>) -> Res<u32> {
-    state.journal.lock().map_err(je)?
-        .count_open().map_err(je)
+    state.journal.lock().map_err(je)?.count_open().map_err(je)
 }
 
 #[tauri::command]
 pub fn export_markdown(state: State<'_, Arc<AppState>>) -> Res<String> {
-    let inc = state.journal.lock().map_err(je)?
-        .list_incidents(1000, 0).map_err(je)?;
+    let inc = state.journal.lock().map_err(je)?.list_incidents(1000, 0).map_err(je)?;
     Ok(export::to_markdown(&inc, "Aegis-Guard Threat Report — Vladimir Unknown"))
 }
 
 #[tauri::command]
 pub fn export_json(state: State<'_, Arc<AppState>>) -> Res<String> {
-    let inc = state.journal.lock().map_err(je)?
-        .list_incidents(1000, 0).map_err(je)?;
+    let inc = state.journal.lock().map_err(je)?.list_incidents(1000, 0).map_err(je)?;
     export::to_json(&inc).map_err(je)
 }
 
@@ -77,17 +56,13 @@ pub fn export_json(state: State<'_, Arc<AppState>>) -> Res<String> {
 
 #[tauri::command]
 pub async fn scan_entropy(request: ScanRequest) -> Res<ScanSummary> {
-    tokio::task::spawn_blocking(move || {
-        entropy::scan_path(request).map_err(je)
-    }).await.map_err(je)?
+    tokio::task::spawn_blocking(move || entropy::scan_path(request).map_err(je)).await.map_err(je)?
 }
 
 // ── Updater commands ──────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn check_update() -> Res<UpdateInfo> {
-    updater::check_update().await.map_err(je)
-}
+pub async fn check_update() -> Res<UpdateInfo> { updater::check_update().await.map_err(je) }
 
 // ── Phase 4: Active Defense commands ─────────────────────────────────────────
 
@@ -98,51 +73,26 @@ pub fn generate_challenge(pid: u32, action: String) -> Res<String> {
 
 #[tauri::command]
 pub async fn execute_action(
-    pid:          u32,
-    process_name: String,
-    exe_path:     Option<String>,
-    action:       String,
-    incident_id:  Option<String>,
-    challenge:    String,
-    note:         String,
-    state:        State<'_, Arc<AppState>>,
+    pid: u32, process_name: String, exe_path: Option<String>, action: String,
+    incident_id: Option<String>, challenge: String, note: String,
+    state: State<'_, Arc<AppState>>,
 ) -> Res<ActionResult> {
     let expected = format!("CONFIRM-{}-{}", action.to_uppercase(), pid);
     if challenge.trim() != expected {
-        return Err(format!(
-            "Invalid challenge token. Expected '{}', got '{}'.",
-            expected, challenge.trim()
-        ));
+        return Err(format!("Invalid challenge token. Expected '{}', got '{}'.", expected, challenge.trim()));
     }
-
     let kind = match action.as_str() {
-        "kill"             => ActionKind::Kill,
-        "quarantine"       => ActionKind::Quarantine,
-        "lift_quarantine"  => ActionKind::LiftQuarantine,
-        "whitelist"        => ActionKind::Whitelist,
-        other              => return Err(format!("Unknown action: {}", other)),
+        "kill" => ActionKind::Kill, "quarantine" => ActionKind::Quarantine,
+        "lift_quarantine" => ActionKind::LiftQuarantine, "whitelist" => ActionKind::Whitelist,
+        other => return Err(format!("Unknown action: {}", other)),
     };
-
-    let req = ActionRequest {
-        pid,
-        process_name,
-        exe_path,
-        kind,
-        incident_id,
-        challenge: challenge.clone(),
-        note,
-    };
-
-    // No .lock() — response_engine is Send + Sync on its own, so this
-    // .await can safely cross thread boundaries.
+    let req = ActionRequest { pid, process_name, exe_path, kind, incident_id, challenge: challenge.clone(), note };
+    // No .lock() — response_engine is Send + Sync on its own.
     state.response_engine.execute(req).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn list_audit_log(
-    limit: u32, offset: u32,
-    state: State<'_, Arc<AppState>>,
-) -> Res<Vec<AuditEntry>> {
+pub fn list_audit_log(limit: u32, offset: u32, state: State<'_, Arc<AppState>>) -> Res<Vec<AuditEntry>> {
     state.response_engine.audit_log().list(limit, offset).map_err(je)
 }
 
@@ -157,10 +107,7 @@ pub fn list_whitelist(state: State<'_, Arc<AppState>>) -> Res<Vec<WhitelistEntry
 }
 
 #[tauri::command]
-pub fn remove_from_whitelist(
-    pid:   u32,
-    state: State<'_, Arc<AppState>>,
-) -> Res<bool> {
+pub fn remove_from_whitelist(pid: u32, state: State<'_, Arc<AppState>>) -> Res<bool> {
     state.response_engine.whitelist().remove(pid).map_err(je)
 }
 
@@ -168,9 +115,7 @@ pub fn remove_from_whitelist(
 
 #[tauri::command]
 pub fn get_ioc_stats() -> Res<IocStats> {
-    threat_intel::ThreatMatcher::new()
-        .map(|m| m.stats())
-        .map_err(je)
+    threat_intel::ThreatMatcher::new().map(|m| m.stats()).map_err(je)
 }
 
 #[tauri::command]
@@ -184,9 +129,7 @@ pub fn check_ioc_manual(value: String, context: String) -> Res<Option<IocMatch>>
 
 #[tauri::command]
 pub fn list_canaries() -> Res<Vec<CanaryToken>> {
-    deception::canary::CanaryManager::new()
-        .map(|m| m.list())
-        .map_err(je)
+    deception::canary::CanaryManager::new().map(|m| m.list()).map_err(je)
 }
 
 #[tauri::command]

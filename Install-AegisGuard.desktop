@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Install Aegis-Guard
+Comment=Run the Aegis-Guard installer — by Vladimir Unknown
+Exec=bash -c 'cd "$(dirname "%k")" && (x-terminal-emulator -e bash installers/install-linux.sh || xterm -e bash installers/install-linux.sh || gnome-terminal -- bash installers/install-linux.sh)'
+Icon=system-software-install
+Terminal=false
+Categories=System;Security;
+StartupNotify=true

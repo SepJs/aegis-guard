@@ -1,40 +1,19 @@
-# Rust / Cargo
 target/
 Cargo.lock
-*.pdb
-
-# Node / npm
 node_modules/
 tauri-app/dist/
 tauri-app/.vite/
-
-# Tauri build artifacts
 tauri-app/src-tauri/target/
-tauri-app/src-tauri/WixTools/
-
-# IDE
 .vscode/
 .idea/
 *.swp
-*.swo
-
-# macOS
 .DS_Store
-
-# Linux
 *~
-
-# Aegis runtime
 /run/aegis/
 *.db
 *.db-shm
 *.db-wal
-
-# Logs
 *.log
-AEGIS_LOG
-
-# Distribution
 dist/
 *.deb
 *.rpm

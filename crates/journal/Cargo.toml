@@ -1,7 +1,7 @@
 [package]
-name    = "journal"
-version = "0.1.0"
-edition = "2021"
+name        = "journal"
+version     = "0.1.0"
+edition     = "2021"
 description = "Aegis-Guard — SQLite threat journal with tamper-evident digests"
 
 [dependencies]

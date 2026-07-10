@@ -22,9 +22,7 @@
         "fullscreen": false
       }
     ],
-    "security": {
-      "csp": null
-    }
+    "security": { "csp": null }
   },
   "bundle": {
     "active": true,
@@ -32,10 +30,6 @@
     "icon": ["icons/icon.png", "icons/icon.ico"],
     "copyright": "Vladimir Unknown",
     "longDescription": "Aegis-Guard endpoint security suite by Vladimir Unknown",
-    "linux": {
-      "deb": {
-        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"]
-      }
-    }
+    "linux": { "deb": { "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"] } }
   }
 }

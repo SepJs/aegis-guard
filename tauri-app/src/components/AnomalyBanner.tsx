@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
-import { listen }              from "@tauri-apps/api/event";
+import { listen } from "@tauri-apps/api/event";
 import type { ThreatIncident } from "../types";
-import RuleBadge               from "./RuleBadge";
+import RuleBadge from "./RuleBadge";
 
 export default function AnomalyBanner() {
   const [alerts, setAlerts] = useState<ThreatIncident[]>([]);
@@ -20,17 +20,10 @@ export default function AnomalyBanner() {
   return (
     <div className="banner-stack">
       {alerts.map(inc => (
-        <div key={inc.id}
-             className={`alert-banner ${inc.severity === "high" ? "ab--high" : "ab--medium"}`}>
+        <div key={inc.id} className={`alert-banner ${inc.severity === "high" ? "ab--high" : "ab--medium"}`}>
           <RuleBadge rule={inc.rule} />
-          <span className="ab-msg">
-            <strong>{inc.process}</strong> — {inc.reason.slice(0, 90)}
-            {inc.reason.length > 90 ? "…" : ""}
-          </span>
-          <button className="ab-close"
-            onClick={() => setAlerts(p => p.filter(a => a.id !== inc.id))}>
-            ✕
-          </button>
+          <span className="ab-msg"><strong>{inc.process}</strong> — {inc.reason.slice(0, 90)}{inc.reason.length > 90 ? "…" : ""}</span>
+          <button className="ab-close" onClick={() => setAlerts(p => p.filter(a => a.id !== inc.id))}>✕</button>
         </div>
       ))}
     </div>

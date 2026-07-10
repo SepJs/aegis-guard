@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Aegis-Guard
+Comment=Endpoint Security Suite — by Vladimir Unknown
+Exec=bash -c 'cd "$(dirname "%k")" && x-terminal-emulator -e bash aegis.sh || xterm -e bash aegis.sh'
+Icon=aegis-guard
+Terminal=false
+Categories=System;Security;
+StartupNotify=true

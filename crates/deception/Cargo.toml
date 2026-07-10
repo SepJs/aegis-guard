@@ -2,7 +2,7 @@
 name        = "deception"
 version     = "0.1.0"
 edition     = "2021"
-description = "Aegis-Guard Phase 5 — honeypot processes + trap files"
+description = "Aegis-Guard Phase 5 — canary token system"
 
 [dependencies]
 serde       = { workspace = true }

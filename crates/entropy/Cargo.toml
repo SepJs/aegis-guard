@@ -1,7 +1,7 @@
 [package]
-name    = "entropy"
-version = "0.1.0"
-edition = "2021"
+name        = "entropy"
+version     = "0.1.0"
+edition     = "2021"
 description = "Aegis-Guard — on-demand Shannon entropy file scanner"
 
 [dependencies]
