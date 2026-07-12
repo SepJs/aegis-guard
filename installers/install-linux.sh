@@ -26,7 +26,30 @@ echo "  ╚═══════════════════════
 echo -e "${RESET}"
 
 if [ ! -f "Cargo.toml" ] || [ ! -d "tauri-app" ]; then
-    echo -e "${RED}Error: run this from inside the aegis-guard project (bash installers/install-linux.sh){RESET}"
+    echo -e "${RED}Error: run this from inside the aegis-guard project (bash installers/install-linux.sh)${RESET}"
+    exit 1
+fi
+
+# ── Environment sanity check ────────────────────────────────────────────────
+# This installer needs real host access (systemd, /usr/local/bin, /etc,
+# package managers). It cannot work from inside a sandboxed terminal —
+# most commonly, VS Code's integrated terminal when VS Code itself was
+# installed via Flatpak. /.flatpak-info only exists inside a Flatpak sandbox.
+if [ -f "/.flatpak-info" ]; then
+    echo -e "${RED}${BOLD}This terminal is running inside a Flatpak sandbox.${RESET}"
+    echo -e "${YELLOW}That's usually VS Code's built-in terminal when VS Code was installed via Flatpak —"
+    echo -e "the sandbox has no access to sudo, systemd, or /usr/local/bin on the host.${RESET}"
+    echo ""
+    echo -e "${BOLD}Fix:${RESET} open a normal desktop terminal app instead (GNOME Terminal, Konsole,"
+    echo -e "xterm, etc. — from your applications menu, not from inside VS Code) and run:"
+    echo -e "  ${CYAN}cd \"$PROJECT_ROOT\" && bash installers/install-linux.sh${RESET}"
+    exit 1
+fi
+
+if [ "$EUID" -ne 0 ] && ! command -v sudo &>/dev/null; then
+    echo -e "${RED}${BOLD}No 'sudo' found, and you're not running as root.${RESET}"
+    echo -e "${YELLOW}This installer needs root access to install system packages and services."
+    echo -e "Install sudo first, or run this script as root.${RESET}"
     exit 1
 fi
 
@@ -34,10 +57,10 @@ fi
 ARCH="$(uname -m)"
 echo -e "${CYAN}Detected CPU architecture:${RESET} ${BOLD}${ARCH}${RESET}"
 case "$ARCH" in
-    x86_64)          echo -e "  ${DIM}→ standard 64-bit (Intel/AMD){RESET}" ;;
-    aarch64|arm64)   echo -e "  ${DIM}→ 64-bit ARM (Raspberry Pi 4/5, ARM servers, etc.){RESET}" ;;
-    armv7l)          echo -e "  ${DIM}→ 32-bit ARM — build will just take longer{RESET}" ;;
-    *)               echo -e "  ${YELLOW}→ unrecognised — build will still attempt to proceed{RESET}" ;;
+    x86_64)          echo -e "  ${DIM}→ standard 64-bit (Intel/AMD)${RESET}" ;;
+    aarch64|arm64)   echo -e "  ${DIM}→ 64-bit ARM (Raspberry Pi 4/5, ARM servers, etc.)${RESET}" ;;
+    armv7l)          echo -e "  ${DIM}→ 32-bit ARM — build will just take longer${RESET}" ;;
+    *)               echo -e "  ${YELLOW}→ unrecognised — build will still attempt to proceed${RESET}" ;;
 esac
 echo ""
 
@@ -60,7 +83,7 @@ esac
 echo -e "${CYAN}Detected distro:${RESET} ${BOLD}${DETECTED_ID:-unknown}${RESET} ${DIM}(family: $detected_family)${RESET}"
 echo ""
 echo -e "${BOLD}Select package manager to use:${RESET}"
-echo -e "  ${DIM}(Press Enter to use detected){RESET}"
+echo -e "  ${DIM}(Press Enter to use detected)${RESET}"
 echo ""
 echo -e "  ${VIOLET}[1]${RESET} Debian / Ubuntu / Mint / Pop!_OS      (apt)"
 echo -e "  ${VIOLET}[2]${RESET} Fedora / RHEL / CentOS / Rocky        (dnf)"
@@ -150,33 +173,35 @@ if command -v go &>/dev/null; then
     HAVE_GO=1
     echo -e "  ${GREEN}✓${RESET} Go: $(go version | awk '{print $3}')"
 else
-    echo -e "  ${YELLOW}⚠ Go not found — network-observer will be skipped (install: https://go.dev/dl){RESET}"
+    echo -e "  ${YELLOW}⚠ Go not found — network-observer will be skipped (install: https://go.dev/dl)${RESET}"
 fi
 
 # ── Step 5: Build everything ───────────────────────────────────────────────────
-echo -e "${CYAN}[3/6] Building Rust workspace (release, ${ARCH})...${RESET}"
+# Frontend MUST be built before any cargo build touches aegis-tauri, since
+# Tauri's build.rs embeds the frontendDist ("../dist") into the binary at
+# compile time — building Rust first would bake in a missing/stale frontend.
+echo -e "${CYAN}[3/6] Building dashboard frontend...${RESET}"
+(cd tauri-app && npm install && npm run build)
+echo -e "  ${GREEN}✓${RESET} frontend built"
+
+echo -e "${CYAN}[4/6] Building Rust workspace (release, ${ARCH})...${RESET}"
 cargo build --release --workspace
 echo -e "  ${GREEN}✓${RESET} Rust build complete"
 
-if [ "$HAVE_GO" = "1" ]; then
-    echo -e "${CYAN}[4/6] Building network-observer...${RESET}"
-    mkdir -p target
-    (cd network-observer && go build -o ../target/aegis-network-observer ./cmd/observer)
-    echo -e "  ${GREEN}✓${RESET} network-observer built"
-fi
-
-echo -e "${CYAN}[5/6] Building dashboard...${RESET}"
-(cd tauri-app && npm install)
-if ! command -v cargo-tauri &>/dev/null; then
-    cargo install tauri-cli --version "^2.0" --locked
-fi
-(cd tauri-app && cargo tauri build --bundles none)   # build binary only; skip .deb/.rpm packaging for a direct local install
-echo -e "  ${GREEN}✓${RESET} dashboard built"
-
-DASH_BIN="$PROJECT_ROOT/tauri-app/src-tauri/target/release/aegis-tauri"
+# tauri-app/src-tauri is a workspace member, so its output binary lands in
+# the shared workspace target/ directory at the project root — NOT in a
+# separate tauri-app/src-tauri/target/.
+DASH_BIN="$PROJECT_ROOT/target/release/aegis-tauri"
 if [ ! -f "$DASH_BIN" ]; then
     echo -e "${RED}Could not find built dashboard binary at $DASH_BIN${RESET}"
     exit 1
+fi
+
+if [ "$HAVE_GO" = "1" ]; then
+    echo -e "${CYAN}[5/6] Building network-observer...${RESET}"
+    mkdir -p target
+    (cd network-observer && go build -o ../target/aegis-network-observer ./cmd/observer)
+    echo -e "  ${GREEN}✓${RESET} network-observer built"
 fi
 
 # ── Step 6: System install (binaries, tmpfiles, systemd, launcher) ────────────
