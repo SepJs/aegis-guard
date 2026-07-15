@@ -22,15 +22,38 @@ use state::AppState;
 /// Ensure the socket directory exists and is writable by any local user.
 /// Sticky bit (mode 1777) means anyone can create a file here, but only
 /// the file's owner can delete/replace it — same model as /tmp.
+///
+/// If installed via installers/install-linux.sh, a systemd-tmpfiles rule
+/// already sets this up correctly on every boot (since /run is a tmpfs and
+/// gets wiped on reboot) — in that case this function is a harmless no-op.
+/// We only attempt to chmod it ourselves as a fallback for dev-mode runs
+/// where that rule isn't installed, and only warn if the permissions are
+/// actually insufficient AND we can't fix them (expected when the directory
+/// is root-owned, since a normal user can never chmod another owner's
+/// directory even when — as in the tmpfiles.d case — it's already correct).
 fn ensure_socket_dir_permissions(socket_path: &str) {
     let dir = std::path::Path::new(socket_path).parent().unwrap_or(std::path::Path::new("/run/aegis"));
-    if let Err(e) = std::fs::create_dir_all(dir) {
-        warn!("could not create socket dir {}: {e} (may need sudo mkdir -p {})", dir.display(), dir.display());
-        return;
+
+    if !dir.exists() {
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            warn!("could not create socket dir {}: {e} (may need sudo mkdir -p {})", dir.display(), dir.display());
+            return;
+        }
     }
+
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
+
+        let already_ok = std::fs::metadata(dir)
+            .map(|m| m.permissions().mode() & 0o1777 == 0o1777)
+            .unwrap_or(false);
+
+        if already_ok {
+            info!(dir = %dir.display(), "socket directory permissions already correct (1777)");
+            return;
+        }
+
         let sticky_world_writable = std::fs::Permissions::from_mode(0o1777);
         if let Err(e) = std::fs::set_permissions(dir, sticky_world_writable) {
             warn!(
@@ -67,22 +90,29 @@ pub fn run() {
 
             let app1 = app.handle().clone();
             let st1 = state.clone();
-            tokio::spawn(ipc_bridge::run(socket, st1, app1));
+            // tauri::async_runtime::spawn (not tokio::spawn) — .setup() runs
+            // synchronously, before any Tokio task context exists on this
+            // thread. Tauri owns and manages its own internal Tokio runtime;
+            // this is the correct way to schedule work onto it from here.
+            // (Nested tokio::spawn calls made *inside* these spawned tasks
+            // are fine, since by then we're genuinely executing on a Tokio
+            // worker thread with proper runtime context.)
+            tauri::async_runtime::spawn(ipc_bridge::run(socket, st1, app1));
 
             if std::env::var("AEGIS_NET").as_deref() == Ok("1") {
                 let app2 = app.handle().clone();
                 let st2 = state.clone();
-                tokio::spawn(net_bridge::run(st2, app2));
+                tauri::async_runtime::spawn(net_bridge::run(st2, app2));
                 info!("network observer bridge enabled");
             }
 
             let st5 = state.clone();
             let app5 = app.handle().clone();
             let dir5 = data_dir.clone();
-            tokio::spawn(async move { phase5_bridge::start(st5, app5, dir5).await; });
+            tauri::async_runtime::spawn(async move { phase5_bridge::start(st5, app5, dir5).await; });
 
             let app_u = app.handle().clone();
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(10)).await;
                 loop {
                     if let Ok(i) = updater::check_update().await {
