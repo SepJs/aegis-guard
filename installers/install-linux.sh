@@ -30,7 +30,7 @@ if [ ! -f "Cargo.toml" ] || [ ! -d "tauri-app" ]; then
     exit 1
 fi
 
-# ── Environment sanity check ────────────────────────────────────────────────
+# ── Environment sanity check ───────────────────────────────────────────────────
 # This installer needs real host access (systemd, /usr/local/bin, /etc,
 # package managers). It cannot work from inside a sandboxed terminal —
 # most commonly, VS Code's integrated terminal when VS Code itself was
@@ -185,6 +185,13 @@ echo -e "${CYAN}[3/6] Building dashboard frontend...${RESET}"
 echo -e "  ${GREEN}✓${RESET} frontend built"
 
 echo -e "${CYAN}[4/6] Building Rust workspace (release, ${ARCH})...${RESET}"
+# Force a fresh compile of aegis-tauri specifically. Cargo's incremental
+# caching only looks at Rust source file changes — it won't notice that
+# the embedded frontend (dist/) is newer, so a stale binary from an earlier
+# build (e.g. from before the frontend existed, or from a previous run of
+# this installer) could otherwise be reused as-is. That shows up as the
+# app window trying to load a Vite dev server that isn't running.
+cargo clean --release -p aegis-tauri 2>/dev/null || true
 cargo build --release --workspace
 echo -e "  ${GREEN}✓${RESET} Rust build complete"
 
@@ -211,7 +218,16 @@ sudo install -m 755 target/release/aegis-process-engine /usr/local/bin/
 [ -f target/aegis-network-observer ] && sudo install -m 755 target/aegis-network-observer /usr/local/bin/
 sudo install -m 755 "$DASH_BIN" /usr/local/bin/aegis-guard-dashboard
 
-sudo install -d -m 750 /var/lib/aegis /var/lib/aegis/quarantine /var/lib/aegis/canaries
+sudo install -d -m 750  /var/lib/aegis
+# quarantine + canary token storage are both written by the DASHBOARD
+# process (Kill/Quarantine/Whitelist and canary creation are Tauri commands
+# that run as the normal desktop user, not by the root-run engine) — same
+# sticky + world-writable pattern as /run/aegis, for the same reason.
+sudo install -d -m 1777 /var/lib/aegis/quarantine /var/lib/aegis/canaries
+# install -d only sets the mode when *creating* a directory — if either of
+# these already exists from a previous run of this script, force the
+# permission fix explicitly too.
+sudo chmod 1777 /var/lib/aegis/quarantine /var/lib/aegis/canaries
 
 # /run is a tmpfs and is wiped on every reboot — a tmpfiles.d rule is the
 # correct, persistent way to recreate /run/aegis with the right permissions
