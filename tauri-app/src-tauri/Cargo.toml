@@ -28,7 +28,7 @@ behavioral     = { path = "../../crates/behavioral" }
 deception      = { path = "../../crates/deception" }
 self-protect   = { path = "../../crates/self-protect" }
 
-tauri          = { version = "2" }
+tauri          = { version = "2", features = [] }
 
 [build-dependencies]
 tauri-build    = { version = "2", features = [] }

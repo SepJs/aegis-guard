@@ -188,11 +188,27 @@ echo -e "${CYAN}[4/6] Building Rust workspace (release, ${ARCH})...${RESET}"
 # Force a fresh compile of aegis-tauri specifically. Cargo's incremental
 # caching only looks at Rust source file changes — it won't notice that
 # the embedded frontend (dist/) is newer, so a stale binary from an earlier
-# build (e.g. from before the frontend existed, or from a previous run of
-# this installer) could otherwise be reused as-is. That shows up as the
-# app window trying to load a Vite dev server that isn't running.
+# build could otherwise be reused as-is.
 cargo clean --release -p aegis-tauri 2>/dev/null || true
-cargo build --release --workspace
+
+# Build process-engine, active-defense, and the other Linux-only crates
+# with a plain cargo build first...
+cargo build --release --workspace --exclude aegis-tauri
+
+# ...then build the dashboard specifically through the official Tauri CLI
+# (`cargo tauri build`), not a raw `cargo build`. A raw `cargo build` alone
+# does not reliably set the environment Tauri needs at compile time to embed
+# and load the production frontend from disk instead of trying to reach a
+# `localhost:1420` dev server that isn't running — which is exactly the
+# "Could not connect to localhost" white-screen symptom. `--bundles appimage`
+# is used only because some tauri-cli versions reject `--bundles none`; the
+# plain binary this produces at target/release/aegis-tauri is what we
+# actually install — the AppImage itself is discarded.
+if ! command -v cargo-tauri &>/dev/null; then
+    echo -e "  ${YELLOW}Installing Tauri CLI (needed once for a correct production build)...${RESET}"
+    cargo install tauri-cli --version "^2.0" --locked
+fi
+(cd tauri-app && cargo tauri build --bundles appimage)
 echo -e "  ${GREEN}✓${RESET} Rust build complete"
 
 # tauri-app/src-tauri is a workspace member, so its output binary lands in
@@ -202,6 +218,16 @@ DASH_BIN="$PROJECT_ROOT/target/release/aegis-tauri"
 if [ ! -f "$DASH_BIN" ]; then
     echo -e "${RED}Could not find built dashboard binary at $DASH_BIN${RESET}"
     exit 1
+fi
+
+# Sanity check: a production binary should NOT reference the Vite dev
+# server URL as a runtime target. If it does, something in the build
+# picked up dev-mode config again — fail loudly here instead of installing
+# a broken binary and discovering it only after opening the app.
+if strings "$DASH_BIN" 2>/dev/null | grep -q "localhost:1420"; then
+    echo -e "${RED}${BOLD}Warning: the built binary still references localhost:1420 (dev server).${RESET}"
+    echo -e "${YELLOW}This usually means it will show a blank white window. Continuing install,"
+    echo -e "but if the app is blank, please report this with the build log above.${RESET}"
 fi
 
 if [ "$HAVE_GO" = "1" ]; then
