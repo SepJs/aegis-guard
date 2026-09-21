@@ -24,12 +24,12 @@ Aegis-Guard operates with zero mock dependencies:
          ▼                                        ▼                                        ▼
 ┌──────────────────┐                    ┌──────────────────┐                    ┌──────────────────┐
 │  Process Engine  │                    │ Network Observer │                    │  Active Defense  │
-│  (Rust / procfs) │                    │ (Go / Raw Sockets)│                   │ (BLAKE3 + nsenter)│
+│  (Rust / procfs) │                    │(Go / Raw Sockets)│                    │(BLAKE3 + nsenter)│
 └────────┬─────────┘                    └────────┬─────────┘                    └────────┬─────────┘
          │ /proc telemetry                       │ Promiscuous & PCAP                    │ SIGTERM / SIGKILL
          ▼                                       ▼                                       ▼
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
-│                                    Host Operating System Kernel                                   │
+│                                    Host Operating System Kernel                                  │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
