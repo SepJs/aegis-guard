@@ -7,7 +7,44 @@
   --tx0:#f1f0ff; --tx1:#a1a1b8; --tx2:#5c5c72;
   --mono:'JetBrains Mono','Fira Code','Cascadia Code',ui-monospace,monospace;
   --scan: repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(124,58,237,.018) 2px,rgba(124,58,237,.018) 4px);
-  --r:4px; --sidebar-w:210px;
+  --r:6px; --sidebar-w:220px;
+}
+
+/* Theme: Cyber Purple (Default) */
+body.theme-cyber-purple {
+  --bg0:#07070c; --bg1:#0d0d16; --bg2:#131320; --bg3:#1a1a2b; --bg4:#222238;
+  --border:#2b2b3f; --border2:#383852;
+  --v:#8b5cf6; --vl:#c4b5fd; --vd:#4c1d95; --v2:rgba(139,92,246,.15);
+  --tx0:#f5f3ff; --tx1:#a78bfa; --tx2:#6d6b88;
+  --scan: repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(139,92,246,.018) 2px,rgba(139,92,246,.018) 4px);
+}
+
+/* Theme: Dark Void (Pitch Black / Stealth) */
+body.theme-dark-void {
+  --bg0:#000000; --bg1:#040404; --bg2:#0a0a0a; --bg3:#121212; --bg4:#1a1a1a;
+  --border:#1f1f1f; --border2:#2a2a2a;
+  --v:#e11d48; --vl:#fb7185; --vd:#881337; --v2:rgba(225,29,72,.14);
+  --tx0:#ffffff; --tx1:#a3a3a3; --tx2:#525252;
+  --scan: none;
+}
+
+/* Theme: GitHub Dark Modern */
+body.theme-github-dark {
+  --bg0:#0d1117; --bg1:#161b22; --bg2:#21262d; --bg3:#30363d; --bg4:#3b434d;
+  --border:#30363d; --border2:#444c56;
+  --v:#58a6ff; --vl:#79c0ff; --vd:#1f6feb; --v2:rgba(56,139,253,.15);
+  --teal:#238636; --teall:#3fb950;
+  --tx0:#f0f6fc; --tx1:#8b949e; --tx2:#6e7681;
+  --scan: none;
+}
+
+/* Theme: Obsidian Matrix (Emerald / Terminal) */
+body.theme-obsidian-matrix {
+  --bg0:#030a06; --bg1:#06140c; --bg2:#0a1e13; --bg3:#0f2b1b; --bg4:#163d27;
+  --border:#173d27; --border2:#215738;
+  --v:#10b981; --vl:#34d399; --vd:#064e3b; --v2:rgba(16,185,129,.14);
+  --tx0:#ecfdf5; --tx1:#6ee7b7; --tx2:#047857;
+  --scan: repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(16,185,129,.02) 2px,rgba(16,185,129,.02) 4px);
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html,body,#root{height:100%;overflow:hidden}

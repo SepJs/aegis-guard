@@ -1,0 +1,7 @@
+{
+  "name": "Aegis-Guard",
+  "description": "Comprehensive native endpoint security and network intrusion detection suite featuring live process tree inspection, eBPF hooks, Shannon entropy file forensics, canary honeytokens, and tamper-evident audit logging.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../lib/ipc/core";
 
 interface CanaryToken { id: string; token: string; file_path: string; description: string; created_ts: number; triggered: boolean }
 
@@ -45,8 +45,22 @@ export default function CanaryPanel() {
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: 9, fontWeight: 700, color: t.triggered ? "var(--redl)" : "var(--teall)", padding: "1px 6px", border: `1px solid ${t.triggered ? "rgba(220,38,38,.4)" : "rgba(13,148,136,.4)"}`, borderRadius: 2 }}>{t.triggered ? "⚠ TRIGGERED" : "ACTIVE"}</span>
               <span style={{ flex: 1, fontSize: 11, color: "var(--tx0)", fontWeight: 600 }}>{t.description || t.file_path}</span>
+              {!t.triggered && (
+                <button
+                  className="sm-btn"
+                  style={{ fontSize: 9, borderColor: "var(--amber)", color: "var(--amberl)" }}
+                  onClick={async () => {
+                    await invoke("trigger_canary_test", { id: t.id });
+                    load();
+                  }}
+                  title="Simulate unauthorized exfiltration of this honeypot token"
+                >
+                  ⚡ TEST TRIP
+                </button>
+              )}
               <button className="sm-btn" style={{ fontSize: 9 }} onClick={() => remove(t.id)}>REMOVE</button>
             </div>
+
             <div className="meta-row"><span className="meta-label">FILE</span><code className="meta-code">{t.file_path}</code></div>
             <div className="meta-row"><span className="meta-label">TOKEN</span><code className="meta-code" style={{ color: "var(--tx2)", fontSize: 9 }}>{t.token.slice(0, 20)}…</code></div>
             <div className="meta-row"><span className="meta-label">CREATED</span><span className="meta-val">{new Date(t.created_ts).toLocaleString("en-GB")}</span></div>

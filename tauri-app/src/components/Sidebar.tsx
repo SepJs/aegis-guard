@@ -2,17 +2,22 @@ import type { Dispatch, SetStateAction } from "react";
 import { useProcessStore } from "../store/processStore";
 import UpdateBanner from "./UpdateBanner";
 
-export type View = "processes" | "journal" | "forensics" | "debug" | "audit" | "intel" | "canary";
+export type View = "processes" | "telemetry" | "network" | "sandbox" | "journal" | "forensics" | "debug" | "audit" | "intel" | "canary" | "settings";
 
 const NAV: { id: View; icon: string; label: string }[] = [
   { id: "processes", icon: "⬡", label: "PROCESSES" },
+  { id: "telemetry", icon: "☵", label: "INTERNAL MOVEMENTS" },
+  { id: "network", icon: "⎔", label: "NETWORK & IDS" },
+  { id: "sandbox", icon: "⌬", label: "VIRUS LAB & SANDBOX" },
   { id: "journal", icon: "◈", label: "JOURNAL" },
-  { id: "forensics", icon: "⊕", label: "FORENSICS" },
-  { id: "debug", icon: "⊘", label: "DEBUG LOG" },
+  { id: "forensics", icon: "⊕", label: "FORENSICS & AV" },
+  { id: "debug", icon: "⊘", label: "SUPPRESSED LOG" },
   { id: "audit", icon: "⬟", label: "AUDIT LOG" },
   { id: "intel", icon: "◉", label: "THREAT INTEL" },
   { id: "canary", icon: "⟡", label: "CANARY" },
+  { id: "settings", icon: "⚙", label: "SETTINGS & THEMES" },
 ];
+
 
 export default function Sidebar({ active, setActive }: { active: View; setActive: Dispatch<SetStateAction<View>> }) {
   const { store } = useProcessStore();

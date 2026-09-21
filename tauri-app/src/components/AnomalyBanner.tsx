@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { listen } from "../lib/ipc/event";
 import type { ThreatIncident } from "../types";
 import RuleBadge from "./RuleBadge";
 

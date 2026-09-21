@@ -1,6 +1,6 @@
 import { useEffect } from "react";
-import { listen } from "@tauri-apps/api/event";
-import { invoke } from "@tauri-apps/api/core";
+import { listen } from "../lib/ipc/event";
+import { invoke } from "../lib/ipc/core";
 import type { ProcEvent, ThreatIncident } from "../types";
 import { useProcessStore } from "../store/processStore";
 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../lib/ipc/core";
 
 interface IocStats { ips: number; cidrs: number; domains: number; hashes: number }
 interface IocMatch { ioc: string; kind: string; threat_type: string; feed: string; confidence: number; context: string }

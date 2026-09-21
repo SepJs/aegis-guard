@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../lib/ipc/core";
 import type { ThreatIncident } from "../types";
 
 type ActionKind = "kill" | "quarantine" | "whitelist";

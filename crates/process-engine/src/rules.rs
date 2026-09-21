@@ -62,9 +62,18 @@ impl RuleEngine {
             }
         }
         if !(found_sshd && found_shell) { return None; }
+
+        // Benign common dev / admin network tools in SSH should not be marked as high false positives
+        let is_high_risk_net_tool = matches!(child_name, "nc" | "ncat" | "netcat" | "nmap" | "telnet");
+        let confidence = if is_high_risk_net_tool {
+            Confidence::Medium
+        } else {
+            Confidence::Low
+        };
+
         Some(AnomalyDetail {
-            rule: "PAR-002".into(), confidence: Confidence::High,
-            reason: format!("Network tool '{}' found in an sshd → shell ancestry chain. This matches the pattern of a compromised SSH session being used for data exfiltration or C2 beacon.", child_name),
+            rule: "PAR-002".into(), confidence,
+            reason: format!("Network utility '{}' executed inside an authenticated SSH session chain. Audited for exfiltration or lateral movement.", child_name),
             parent_exe: sshd_exe, ancestors: ancestors.to_vec(),
         })
     }

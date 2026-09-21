@@ -145,6 +145,14 @@ pub fn run() {
             commands::create_canary,
             commands::delete_canary,
             commands::get_behavioral_stats,
+            commands::set_auto_update,
+            commands::apply_update,
+            commands::trust_user_app,
+            commands::remove_user_app_safeguard,
+            commands::isolate_to_sandbox,
+            commands::simulate_network_attack,
+            commands::block_ip_address,
+            commands::unblock_ip_address,
         ])
         .run(tauri::generate_context!())
         .expect("error running Tauri application");

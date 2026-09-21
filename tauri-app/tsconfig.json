@@ -3,7 +3,8 @@
     "target": "ES2021", "lib": ["ES2021", "DOM"], "module": "ESNext",
     "moduleResolution": "bundler", "jsx": "react-jsx", "strict": true,
     "noUnusedLocals": true, "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true, "skipLibCheck": true
+    "noFallthroughCasesInSwitch": true, "skipLibCheck": true,
+    "noEmit": true
   },
   "include": ["src"]
 }

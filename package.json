@@ -1,0 +1,24 @@
+{
+  "name": "aegis-guard",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npm --prefix tauri-app run dev -- --host 0.0.0.0 --port 3000",
+    "build": "npm --prefix tauri-app run build && rm -rf dist && cp -r tauri-app/dist ./dist",
+    "lint": "npm --prefix tauri-app run build",
+    "postinstall": "npm --prefix tauri-app install"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.7.2",
+    "vite": "^5.4.11"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}
