@@ -1,7 +1,22 @@
 package netmon
 
-import ("bufio"; "context"; "encoding/hex"; "fmt"; "net"; "os"; "path/filepath"; "strconv"; "strings"; "sync"; "time"
-	"github.com/SepJs/aegis-guard/network-observer/internal/rules")
+import (
+	"bufio"
+	"context"
+	"encoding/hex"
+	"fmt"
+	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/SepJs/aegis-guard/network-observer/internal/rules"
+)
 
 const pollInterval = 500 * time.Millisecond
 
@@ -56,6 +71,13 @@ func (m *Monitor) emit(conn ProcessConn) {
 }
 
 func (m *Monitor) snapshot() (map[uint64]ProcessConn, error) {
+	if runtime.GOOS == "windows" {
+		return m.snapshotWindows()
+	}
+	return m.snapshotLinux()
+}
+
+func (m *Monitor) snapshotLinux() (map[uint64]ProcessConn, error) {
 	inodes := make(map[uint64]Connection)
 	for _, proto := range []string{"tcp", "tcp6", "udp", "udp6"} {
 		conns, err := readProcNet(proto)
@@ -84,6 +106,100 @@ func (m *Monitor) snapshot() (map[uint64]ProcessConn, error) {
 		}
 	}
 	return result, nil
+}
+
+func (m *Monitor) snapshotWindows() (map[uint64]ProcessConn, error) {
+	procMap := getWindowsProcMap()
+	result := make(map[uint64]ProcessConn)
+
+	cmd := exec.Command("netstat", "-ano", "-p", "tcp")
+	output, err := cmd.Output()
+	if err != nil {
+		return result, nil
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		fields := strings.Fields(line)
+		if len(fields) < 5 || (fields[0] != "TCP" && fields[0] != "UDP") {
+			continue
+		}
+		localIP, localPort := parseHostPort(fields[1])
+		remoteIP, remotePort := parseHostPort(fields[2])
+		state := fields[3]
+		pidStr := fields[4]
+		if len(fields) == 4 && fields[0] == "UDP" {
+			pidStr = fields[3]
+			state = "UDP"
+		}
+		pid64, err := strconv.ParseUint(pidStr, 10, 32)
+		if err != nil || pid64 == 0 {
+			continue
+		}
+		pid := uint32(pid64)
+		procName := procMap[pid]
+		if procName == "" {
+			procName = fmt.Sprintf("pid-%d", pid)
+		}
+
+		h := uint64(localPort)<<32 | uint64(remotePort)<<16 | uint64(pid&0xFFFF)
+		conn := Connection{
+			Inode:      h,
+			LocalIP:    localIP,
+			LocalPort:  localPort,
+			RemoteIP:   remoteIP,
+			RemotePort: remotePort,
+			Protocol:   strings.ToLower(fields[0]),
+			State:      state,
+			UID:        1000,
+		}
+		result[h] = ProcessConn{
+			Connection: conn,
+			PID:        pid,
+			Process:    procName,
+		}
+	}
+	return result, nil
+}
+
+func parseHostPort(s string) (net.IP, uint16) {
+	s = strings.TrimPrefix(s, "[")
+	s = strings.TrimSuffix(s, "]")
+	idx := strings.LastIndex(s, ":")
+	if idx == -1 {
+		return net.IPv4(0, 0, 0, 0), 0
+	}
+	ipStr := s[:idx]
+	portStr := s[idx+1:]
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		ip = net.IPv4(0, 0, 0, 0)
+	}
+	p, _ := strconv.ParseUint(portStr, 10, 16)
+	return ip, uint16(p)
+}
+
+func getWindowsProcMap() map[uint32]string {
+	res := make(map[uint32]string)
+	cmd := exec.Command("tasklist", "/FO", "CSV", "/NH")
+	out, err := cmd.Output()
+	if err != nil {
+		return res
+	}
+	scanner := bufio.NewScanner(strings.NewReader(string(out)))
+	for scanner.Scan() {
+		line := scanner.Text()
+		parts := strings.Split(line, ",")
+		if len(parts) >= 2 {
+			name := strings.Trim(parts[0], "\" ")
+			pidStr := strings.Trim(parts[1], "\" ")
+			if p, err := strconv.ParseUint(pidStr, 10, 32); err == nil {
+				res[uint32(p)] = name
+			}
+		}
+	}
+	return res
 }
 
 func readProcNet(proto string) ([]Connection, error) {

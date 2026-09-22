@@ -17,6 +17,7 @@ tracing            = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid               = { workspace = true }
 chrono             = { workspace = true }
+blake3             = { workspace = true }
 
 ipc            = { path = "../../crates/ipc" }
 journal        = { path = "../../crates/journal" }
@@ -27,6 +28,7 @@ threat-intel   = { path = "../../crates/threat-intel" }
 behavioral     = { path = "../../crates/behavioral" }
 deception      = { path = "../../crates/deception" }
 self-protect   = { path = "../../crates/self-protect" }
+process-engine = { path = "../../crates/process-engine" }
 
 tauri          = { version = "2", features = [] }
 

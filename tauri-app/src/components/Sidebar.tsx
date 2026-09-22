@@ -9,7 +9,7 @@ const NAV: { id: View; icon: string; label: string }[] = [
   { id: "telemetry", icon: "☵", label: "INTERNAL MOVEMENTS" },
   { id: "network", icon: "⎔", label: "NETWORK & IDS" },
   { id: "sandbox", icon: "⌬", label: "VIRUS LAB & SANDBOX" },
-  { id: "journal", icon: "◈", label: "JOURNAL" },
+  { id: "journal", icon: "◈", label: "JOURNAL2" },
   { id: "forensics", icon: "⊕", label: "FORENSICS & AV" },
   { id: "debug", icon: "⊘", label: "SUPPRESSED LOG" },
   { id: "audit", icon: "⬟", label: "AUDIT LOG" },

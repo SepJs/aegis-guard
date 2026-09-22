@@ -78,7 +78,7 @@ export default function ThreatJournal() {
   return (
     <div className="panel">
       <div className="panel-header">
-        <span className="panel-title">THREAT JOURNAL & INCIDENTS</span>
+        <span className="panel-title">THREAT JOURNAL2 & INCIDENTS</span>
         {open.length > 0 && <span className="pstat pstat--warn">{open.length} ACTIVE INCIDENTS</span>}
         <span className="pstat">MULTI-TIER EVALUATED</span>
         <div className="toolbar-right">

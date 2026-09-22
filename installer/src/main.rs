@@ -34,18 +34,38 @@ fn main() -> anyhow::Result<()> {
     run_stream("cargo", &["build", "--release", "--workspace"]);
     step_ok("Rust build complete");
 
-    step("Building network observer");
-    std::fs::create_dir_all("target").ok();
-    let _ = Command::new("sh").arg("-c")
-        .arg("cd network-observer && go build -o ../target/aegis-network-observer ./cmd/observer")
-        .status();
+    step("Building Go network observer");
+    std::fs::create_dir_all("target/release").ok();
+    let observer_out = if cfg!(windows) {
+        "../target/release/aegis-network-observer.exe"
+    } else {
+        "../target/release/aegis-network-observer"
+    };
+    let mut go_cmd = Command::new("go");
+    go_cmd.current_dir("network-observer").args(["build", "-o", observer_out, "./cmd/observer"]);
+    let _ = go_cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit()).status();
     step_ok("Network observer built");
 
     step("Installing npm dependencies");
-    let _ = Command::new("sh").arg("-c").arg("cd tauri-app && npm install").status();
+    let mut npm_cmd = if cfg!(windows) {
+        let mut c = Command::new("cmd");
+        c.args(["/C", "npm", "install"]);
+        c
+    } else {
+        let mut c = Command::new("npm");
+        c.arg("install");
+        c
+    };
+    npm_cmd.current_dir("tauri-app");
+    let _ = npm_cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit()).status();
     step_ok("npm dependencies installed");
 
-    println!("\n{GREEN}{BOLD}Done.{RESET} Run everything with:\n  {CYAN}bash aegis.sh{RESET}\n");
+    let run_cmd = if cfg!(windows) {
+        "installers\\install-windows.bat"
+    } else {
+        "bash aegis.sh"
+    };
+    println!("\n{GREEN}{BOLD}Done.{RESET} Run everything with:\n  {CYAN}{run_cmd}{RESET}\n");
     Ok(())
 }
 

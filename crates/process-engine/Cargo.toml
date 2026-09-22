@@ -4,6 +4,10 @@ version     = "0.1.0"
 edition     = "2021"
 description = "Aegis-Guard — Linux process monitoring and anomaly detection engine"
 
+[lib]
+name = "process_engine"
+path = "src/lib.rs"
+
 [[bin]]
 name = "aegis-process-engine"
 path = "src/main.rs"
@@ -18,5 +22,7 @@ tracing            = { workspace = true }
 tracing-subscriber = { workspace = true }
 chrono             = { workspace = true }
 uuid               = { workspace = true }
-procfs             = "0.17"
 ipc                = { path = "../ipc" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+procfs             = "0.17"

@@ -4,9 +4,29 @@ import ("fmt"; "net"; "sync"; "time")
 
 type NetAlert struct { Rule string; Confidence string; Reason string; Category string }
 
-var knownC2Ports = map[uint16]string{4444:"Metasploit default",4445:"Metasploit alt",1337:"common RAT / leet port",31337:"Back Orifice",6666:"common reverse shell",6667:"IRC botnet C2",9001:"Tor entry / common C2",1234:"Netcat default",5555:"Android ADB / RAT"}
-var suspectNetProcs = map[string]bool{"bash":true,"sh":true,"dash":true,"zsh":true,"fish":true,"ksh":true,"ash":true,"python3":true,"python":true,"perl":true,"ruby":true,"node":true,"nodejs":true,"php":true,"lua":true}
-var browserProcs = map[string]bool{"firefox":true,"firefox-bin":true,"chromium":true,"chrome":true,"brave":true}
+var knownC2Ports = map[uint16]string{
+	4444: "Metasploit default", 4445: "Metasploit alt", 1337: "common RAT / leet port",
+	31337: "Back Orifice", 6666: "common reverse shell", 6667: "IRC botnet C2",
+	9001: "Tor entry / common C2", 1234: "Netcat default", 5555: "Android ADB / RAT",
+	8088: "Yarn C2 / Botnet", 8888: "Empire / Covenant C2",
+}
+
+var suspectNetProcs = map[string]bool{
+	"bash": true, "sh": true, "dash": true, "zsh": true, "fish": true, "ksh": true, "ash": true,
+	"python3": true, "python": true, "perl": true, "ruby": true, "node": true, "nodejs": true,
+	"php": true, "lua": true,
+	"powershell": true, "powershell.exe": true, "pwsh": true, "pwsh.exe": true,
+	"cmd": true, "cmd.exe": true, "wscript": true, "wscript.exe": true,
+	"cscript": true, "cscript.exe": true, "mshta": true, "mshta.exe": true,
+	"certutil": true, "certutil.exe": true, "rundll32": true, "rundll32.exe": true,
+	"regsvr32": true, "regsvr32.exe": true, "bitsadmin": true, "bitsadmin.exe": true,
+}
+
+var browserProcs = map[string]bool{
+	"firefox": true, "firefox-bin": true, "firefox.exe": true,
+	"chromium": true, "chromium-browser": true, "chrome": true, "chrome.exe": true,
+	"brave": true, "brave.exe": true, "msedge": true, "msedge.exe": true, "opera": true, "opera.exe": true,
+}
 
 type RateTracker struct { mu sync.Mutex; counts map[uint32][]time.Time; window time.Duration; threshold int }
 

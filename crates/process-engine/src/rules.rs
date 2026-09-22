@@ -2,11 +2,32 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use crate::models::{AnomalyDetail, Confidence, ProcInfo};
 
-const BROWSER_NAMES: &[&str] = &["firefox","firefox-bin","firefox-esr","chromium","chromium-browser","chrome","brave","brave-browser","opera","vivaldi","epiphany","midori"];
-const SHELL_NAMES: &[&str] = &["bash","sh","dash","zsh","fish","ksh","tcsh","csh","ash","mksh","posh"];
-const NETWORK_TOOLS: &[&str] = &["curl","wget","nc","ncat","netcat","nmap","ssh","scp","sftp","ftp","telnet","python3","python","perl","ruby","node","nodejs","php","lua"];
-const OFFICE_NAMES: &[&str] = &["soffice","soffice.bin","libreoffice","libreoffice-writer","libreoffice-calc","evince","okular","zathura","abiword","gnumeric"];
-const INTERPRETER_NAMES: &[&str] = &["bash","sh","dash","zsh","python3","python","perl","ruby","node","nodejs","php","lua","tclsh","wish"];
+const BROWSER_NAMES: &[&str] = &[
+    "firefox","firefox-bin","firefox-esr","firefox.exe",
+    "chromium","chromium-browser","chrome","chrome.exe",
+    "brave","brave-browser","brave.exe",
+    "msedge","msedge.exe",
+    "opera","opera.exe","vivaldi","vivaldi.exe","epiphany","midori"
+];
+const SHELL_NAMES: &[&str] = &[
+    "bash","bash.exe","sh","sh.exe","dash","dash.exe","zsh","fish","ksh","tcsh","csh","ash","mksh","posh",
+    "cmd","cmd.exe","powershell","powershell.exe","pwsh","pwsh.exe",
+    "wscript","wscript.exe","cscript","cscript.exe","mshta","mshta.exe"
+];
+const NETWORK_TOOLS: &[&str] = &[
+    "curl","curl.exe","wget","wget.exe","nc","nc.exe","ncat","ncat.exe","netcat","nmap","nmap.exe",
+    "ssh","ssh.exe","scp","scp.exe","sftp","ftp","ftp.exe","telnet","telnet.exe",
+    "certutil","certutil.exe","bitsadmin","bitsadmin.exe",
+    "python3","python3.exe","python","python.exe","perl","perl.exe","ruby","ruby.exe","node","node.exe","nodejs","php","lua"
+];
+const OFFICE_NAMES: &[&str] = &[
+    "soffice","soffice.bin","libreoffice","libreoffice-writer","libreoffice-calc","evince","okular","zathura","abiword","gnumeric",
+    "winword","winword.exe","excel","excel.exe","powerpnt","powerpnt.exe","outlook","outlook.exe"
+];
+const INTERPRETER_NAMES: &[&str] = &[
+    "bash","sh","dash","zsh","python3","python","perl","ruby","node","nodejs","php","lua","tclsh","wish",
+    "powershell","powershell.exe","cmd","cmd.exe","cscript","cscript.exe","wscript","wscript.exe"
+];
 
 #[derive(Clone)]
 pub struct RuleEngine {

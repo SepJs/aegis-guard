@@ -7,7 +7,18 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-const CANARY_DIR: &str = "/var/lib/aegis/canaries";
+fn get_canary_dir() -> PathBuf {
+    #[cfg(windows)]
+    {
+        std::env::var("LOCALAPPDATA")
+            .map(|p| PathBuf::from(p).join("Aegis-Guard").join("canaries"))
+            .unwrap_or_else(|_| PathBuf::from("C:\\ProgramData\\Aegis-Guard\\canaries"))
+    }
+    #[cfg(not(windows))]
+    {
+        PathBuf::from("/var/lib/aegis/canaries")
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CanaryToken { pub id: String, pub token: String, pub file_path: String, pub description: String, pub created_ts: i64, pub triggered: bool }
@@ -16,8 +27,9 @@ pub struct CanaryManager { tokens: RwLock<HashMap<String, CanaryToken>>, store: 
 
 impl CanaryManager {
     pub fn new() -> Result<Self> {
-        let store = PathBuf::from(CANARY_DIR).join("tokens.json");
-        std::fs::create_dir_all(CANARY_DIR)?;
+        let dir = get_canary_dir();
+        let store = dir.join("tokens.json");
+        std::fs::create_dir_all(&dir)?;
         let tokens = if store.exists() {
             let raw: Vec<CanaryToken> = serde_json::from_str(&std::fs::read_to_string(&store)?).unwrap_or_default();
             raw.into_iter().map(|t| (t.token.clone(), t)).collect()

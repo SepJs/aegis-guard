@@ -3448,6 +3448,9 @@ export class AegisSecurityEngine {
   // --- IPC Commands Dispatcher ---
   public async handleInvoke<T = any>(cmd: string, args?: any): Promise<T> {
     switch (cmd) {
+      case "list_processes":
+        return Array.from(this.processes.values()) as unknown as T;
+
       case "count_open":
         return this.incidents.filter((i) => !i.resolved).length as unknown as T;
 

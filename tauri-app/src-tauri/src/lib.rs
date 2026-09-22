@@ -32,6 +32,9 @@ use state::AppState;
 /// is root-owned, since a normal user can never chmod another owner's
 /// directory even when — as in the tmpfiles.d case — it's already correct).
 fn ensure_socket_dir_permissions(socket_path: &str) {
+    if socket_path.contains(':') || cfg!(windows) {
+        return;
+    }
     let dir = std::path::Path::new(socket_path).parent().unwrap_or(std::path::Path::new("/run/aegis"));
 
     if !dir.exists() {
@@ -99,12 +102,11 @@ pub fn run() {
             // worker thread with proper runtime context.)
             tauri::async_runtime::spawn(ipc_bridge::run(socket, st1, app1));
 
-            if std::env::var("AEGIS_NET").as_deref() == Ok("1") {
-                let app2 = app.handle().clone();
-                let st2 = state.clone();
-                tauri::async_runtime::spawn(net_bridge::run(st2, app2));
-                info!("network observer bridge enabled");
-            }
+            // Network observer bridge runs to automatically connect whenever Go observer starts
+            let app2 = app.handle().clone();
+            let st2 = state.clone();
+            tauri::async_runtime::spawn(net_bridge::run(st2, app2));
+            info!("network observer bridge enabled");
 
             let st5 = state.clone();
             let app5 = app.handle().clone();
@@ -149,10 +151,43 @@ pub fn run() {
             commands::apply_update,
             commands::trust_user_app,
             commands::remove_user_app_safeguard,
+            commands::list_user_apps,
+            commands::list_processes,
             commands::isolate_to_sandbox,
             commands::simulate_network_attack,
             commands::block_ip_address,
             commands::unblock_ip_address,
+            commands::block_remote_ip,
+            commands::unblock_remote_ip,
+            commands::list_network_connections,
+            commands::list_dns_queries,
+            commands::list_network_attacks,
+            commands::get_network_defense_config,
+            commands::update_network_defense_config,
+            commands::terminate_network_connection,
+            commands::list_telemetry,
+            commands::evaluate_command,
+            commands::simulate_movement_scenario,
+            commands::list_sandbox_reports,
+            commands::launch_sandbox_jail,
+            commands::terminate_sandbox_jail,
+            commands::send_target_to_sandbox,
+            commands::list_virus_signatures,
+            commands::list_malware_results,
+            commands::get_av_stats,
+            commands::scan_malware_target,
+            commands::test_malware_sample,
+            commands::quarantine_malware_file,
+            commands::confirm_malware_quarantine,
+            commands::set_auto_remediation,
+            commands::get_storage_stats,
+            commands::prune_logs,
+            commands::get_auto_prune_config,
+            commands::update_auto_prune_config,
+            commands::list_temp_artifacts,
+            commands::list_user_whitelisted_apps,
+            commands::remove_user_whitelisted_app,
+            commands::trigger_canary_test,
         ])
         .run(tauri::generate_context!())
         .expect("error running Tauri application");

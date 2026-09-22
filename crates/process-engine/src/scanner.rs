@@ -61,7 +61,23 @@ async fn run_scanner(tx: mpsc::Sender<ProcEvent>, rules: RuleEngine, path_rules:
     }
 }
 
-fn snapshot_all() -> Result<HashMap<u32, ProcInfo>> {
+pub fn snapshot_all() -> Result<HashMap<u32, ProcInfo>> {
+    #[cfg(target_os = "linux")]
+    {
+        snapshot_linux()
+    }
+    #[cfg(windows)]
+    {
+        snapshot_windows()
+    }
+    #[cfg(all(not(target_os = "linux"), not(windows)))]
+    {
+        snapshot_fallback()
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn snapshot_linux() -> Result<HashMap<u32, ProcInfo>> {
     let mut map = HashMap::new();
     for entry in fs::read_dir("/proc")? {
         let entry = match entry { Ok(e) => e, Err(_) => continue };
@@ -73,6 +89,45 @@ fn snapshot_all() -> Result<HashMap<u32, ProcInfo>> {
     Ok(map)
 }
 
+#[cfg(windows)]
+fn snapshot_windows() -> Result<HashMap<u32, ProcInfo>> {
+    let mut map = HashMap::new();
+    if let Ok(output) = std::process::Command::new("tasklist")
+        .args(["/FO", "CSV", "/V", "/NH"])
+        .output()
+    {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            let fields: Vec<&str> = line.split("\",\"").collect();
+            if fields.len() >= 2 {
+                let name = fields[0].trim_matches('"').to_string();
+                let pid_str = fields[1].trim_matches('"');
+                if let Ok(pid) = pid_str.parse::<u32>() {
+                    if pid == 0 { continue; }
+                    map.insert(pid, ProcInfo {
+                        pid,
+                        ppid: 0,
+                        name: name.clone(),
+                        cmdline: vec![name.clone()],
+                        exe: Some(format!("C:\\Windows\\System32\\{}", name)),
+                        cwd: None,
+                        uid: 1000,
+                        gid: 1000,
+                        start_time: 0,
+                    });
+                }
+            }
+        }
+    }
+    Ok(map)
+}
+
+#[cfg(all(not(target_os = "linux"), not(windows)))]
+fn snapshot_fallback() -> Result<HashMap<u32, ProcInfo>> {
+    Ok(HashMap::new())
+}
+
+#[cfg(target_os = "linux")]
 fn read_proc_info(pid: u32) -> Option<ProcInfo> {
     let base = format!("/proc/{}", pid);
     let status_raw = fs::read_to_string(format!("{}/status", base)).ok()?;
@@ -85,6 +140,7 @@ fn read_proc_info(pid: u32) -> Option<ProcInfo> {
     Some(ProcInfo { pid, ppid, name, cmdline, exe, cwd, uid, gid, start_time })
 }
 
+#[cfg(target_os = "linux")]
 fn parse_status(raw: &str) -> Option<(String, u32, u32, u32)> {
     let (mut name, mut ppid, mut uid, mut gid) = (String::new(), 0u32, 0u32, 0u32);
     for line in raw.lines() {
@@ -97,11 +153,13 @@ fn parse_status(raw: &str) -> Option<(String, u32, u32, u32)> {
     Some((name, ppid, uid, gid))
 }
 
+#[cfg(target_os = "linux")]
 fn parse_cmdline(raw: &[u8]) -> Vec<String> {
     raw.split(|&b| b == 0).filter(|s| !s.is_empty())
         .map(|s| String::from_utf8_lossy(s).into_owned()).collect()
 }
 
+#[cfg(target_os = "linux")]
 fn read_start_time(pid: u32) -> Option<u64> {
     let stat = fs::read_to_string(format!("/proc/{}/stat", pid)).ok()?;
     let after_comm = stat.rfind(')')?;

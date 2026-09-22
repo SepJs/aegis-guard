@@ -9,18 +9,45 @@ use crate::models::{ActionKind, ActionResult, ResponseError};
 
 static QUARANTINED: Lazy<Mutex<HashSet<u32>>> = Lazy::new(|| Mutex::new(HashSet::new()));
 
-fn quarantine_dir() -> PathBuf { PathBuf::from("/var/lib/aegis/quarantine") }
+fn quarantine_dir() -> PathBuf {
+    #[cfg(windows)]
+    {
+        std::env::var("LOCALAPPDATA")
+            .map(|p| PathBuf::from(p).join("Aegis-Guard").join("quarantine"))
+            .unwrap_or_else(|_| PathBuf::from("C:\\ProgramData\\Aegis-Guard\\quarantine"))
+    }
+    #[cfg(not(windows))]
+    {
+        PathBuf::from("/var/lib/aegis/quarantine")
+    }
+}
 
 pub async fn quarantine_process(pid: u32, name: String) -> Result<ActionResult, ResponseError> {
     std::fs::create_dir_all(quarantine_dir()).map_err(|e| ResponseError::ExecutionFailed(e.to_string()))?;
-    { let q = QUARANTINED.lock().unwrap(); if q.contains(&pid) { return Err(ResponseError::ExecutionFailed(format!("Process pid {} is already quarantined.", pid))); } }
+    {
+        let q = QUARANTINED.lock().unwrap();
+        if q.contains(&pid) {
+            return Err(ResponseError::ExecutionFailed(format!("Process pid {} is already quarantined.", pid)));
+        }
+    }
 
-    let output = Command::new("nsenter").args([&format!("--target={}", pid), "--net", "--", "ip", "link", "set", "lo", "down"]).output().await
-        .map_err(|e| ResponseError::ExecutionFailed(format!("nsenter failed: {} — ensure nsenter is installed and running as root", e)))?;
+    #[cfg(target_os = "linux")]
+    {
+        let output = Command::new("nsenter").args([&format!("--target={}", pid), "--net", "--", "ip", "link", "set", "lo", "down"]).output().await
+            .map_err(|e| ResponseError::ExecutionFailed(format!("nsenter failed: {} — ensure nsenter is installed and running as root", e)))?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        warn!(pid, "nsenter failed ({}): {} — using marker-only quarantine", output.status, stderr.trim());
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            warn!(pid, "nsenter failed ({}): {} — using marker-only quarantine", output.status, stderr.trim());
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        let rule_name = format!("Aegis-Quarantine-{}", pid);
+        let _ = Command::new("netsh")
+            .args(["advfirewall", "firewall", "add", "rule", &format!("name={}", rule_name), "dir=out", "action=block"])
+            .output().await;
     }
 
     let marker = quarantine_dir().join(format!("{}.quarantine", pid));
@@ -32,6 +59,14 @@ pub async fn quarantine_process(pid: u32, name: String) -> Result<ActionResult, 
 }
 
 pub async fn lift_quarantine(pid: u32) -> Result<ActionResult, ResponseError> {
+    #[cfg(windows)]
+    {
+        let rule_name = format!("Aegis-Quarantine-{}", pid);
+        let _ = Command::new("netsh")
+            .args(["advfirewall", "firewall", "delete", "rule", &format!("name={}", rule_name)])
+            .output().await;
+    }
+
     let marker = quarantine_dir().join(format!("{}.quarantine", pid));
     if marker.exists() { std::fs::remove_file(&marker).map_err(|e| ResponseError::ExecutionFailed(e.to_string()))?; }
     { let mut q = QUARANTINED.lock().unwrap(); q.remove(&pid); }

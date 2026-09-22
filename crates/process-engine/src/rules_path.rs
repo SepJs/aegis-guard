@@ -2,8 +2,15 @@ use std::collections::HashMap;
 use std::fs;
 use crate::models::{AnomalyDetail, Confidence, ProcInfo};
 
-const FORBIDDEN_EXEC_DIRS: &[&str] = &["/tmp", "/var/tmp", "/dev/shm"];
-const OBFUSCATION_PATTERNS: &[&str] = &["base64","eval","exec(","IEX(","fromCharCode","/dev/stdin","/dev/tcp/","/dev/udp/",">${IFS}","${IFS}","\\x"];
+const FORBIDDEN_EXEC_DIRS: &[&str] = &[
+    "/tmp", "/var/tmp", "/dev/shm",
+    "\\AppData\\Local\\Temp", "\\Windows\\Temp", "\\Users\\Public",
+    "/appdata/local/temp", "/windows/temp", "/users/public"
+];
+const OBFUSCATION_PATTERNS: &[&str] = &[
+    "base64","eval","exec(","IEX(","fromCharCode","/dev/stdin","/dev/tcp/","/dev/udp/",
+    ">${IFS}","${IFS}","\\x","downloadstring","invoke-expression","bypass -enc","hidden -enc"
+];
 
 pub struct PathRuleEngine;
 
@@ -157,8 +164,16 @@ impl PathRuleEngine {
 impl Default for PathRuleEngine { fn default() -> Self { Self::new() } }
 
 fn read_environ(pid: u32) -> Option<Vec<String>> {
-    let raw = fs::read(format!("/proc/{}/environ", pid)).ok()?;
-    Some(raw.split(|&b| b == 0).filter(|s| !s.is_empty()).map(|s| String::from_utf8_lossy(s).into_owned()).collect())
+    #[cfg(target_os = "linux")]
+    {
+        let raw = fs::read(format!("/proc/{}/environ", pid)).ok()?;
+        Some(raw.split(|&b| b == 0).filter(|s| !s.is_empty()).map(|s| String::from_utf8_lossy(s).into_owned()).collect())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = pid;
+        None
+    }
 }
 
 fn truncate(s: &str, max: usize) -> &str { if s.len() <= max { s } else { &s[..max] } }
