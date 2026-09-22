@@ -44,21 +44,32 @@ What this automated script executes:
 Windows installations require Administrator rights to interact with the Service Control Manager (`sc.exe`), configure Windows Advanced Firewall, and restrict quarantine ACLs.
 
 ### Automated One-Click Install:
-1. Right-click `installers/install-windows.bat` and select **"Run as administrator"**.
-   *(Or run in an elevated PowerShell: `powershell -ExecutionPolicy Bypass -File .\installers\install-windows.ps1`)*
+Option 1 — Elevated PowerShell One-Liner (No download required):
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/install-windows.ps1 | iex"
+```
+
+Option 2 — Double-Click Local Batch:
+1. Double-click `1-CLICK-INSTALL-WINDOWS.bat` (in the root or `installers/` folder).
+2. Accept the Windows UAC Administrator prompt.
 
 What the Windows installer executes:
 1. **Elevates Privileges:** Automatically triggers UAC elevation if not already running as Admin.
 2. **Verifies Evergreen WebView2:** Ensures the Microsoft WebView2 runtime is present (downloads and silently installs it if missing).
-3. **Provisions Secure Paths:**
+3. **Deploys Dashboard Assets & Native Executable:**
+   - Installs the full production dashboard to `C:\Program Files\Aegis-Guard\resources\app\dist`.
+   - Deploys `C:\Program Files\Aegis-Guard\Aegis-Guard.exe` (with pre-built release or native Windows host compiler).
+4. **Provisions Secure Paths:**
    - Creates `C:\ProgramData\Aegis-Guard` for database logs, honeypot canaries, and audit logs.
    - Creates `C:\ProgramData\Aegis-Guard\quarantine` with strict `icacls` (read/write restricted exclusively to `SYSTEM` and `Administrators`, execution stripped).
-4. **Configures Packet Inspection & Firewall:**
+5. **Configures Packet Inspection & Firewall:**
    - Adds loopback filtering rules for local IPC telemetry.
-5. **Registers Windows Service:**
+6. **Registers Windows Service:**
    - Installs `AegisGuardService` with auto-restart recovery on failure.
-6. **Creates Shortcuts:**
-   - Installs Desktop and Start Menu shortcuts pointing to `Aegis-Guard.exe`.
+7. **Creates Verified Shortcuts:**
+   - Installs Desktop and Start Menu shortcuts pointing directly to `Aegis-Guard.exe`.
+8. **Instant Launch:**
+   - Automatically starts the application window and arms endpoint defense.
 
 ---
 

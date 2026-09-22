@@ -27,17 +27,16 @@ echo [+] Elevated Administrator privileges verified.
 echo [*] Executing deployment pipeline...
 echo.
 
-:: 2. Run PowerShell installer (local if present, otherwise fetch official script)
-if exist "%~dp0install-windows.ps1" (
-    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install-windows.ps1"
-) else if exist "%~dp0installers\install-windows.ps1" (
+:: 2. Run PowerShell installer
+if exist "%~dp0installers\install-windows.ps1" (
     powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0installers\install-windows.ps1"
+) else if exist "%~dp0install-windows.ps1" (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install-windows.ps1"
 ) else (
-    echo [*] Downloading latest installer script from official repository...
+    echo [*] Fetching latest installer from official repository...
     powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/install-windows.ps1 | iex"
 )
 
 echo.
-echo [OK] Aegis-Guard has been deployed and armed!
-echo Desktop icon has been placed and application is active.
+echo [OK] Aegis-Guard deployment completed!
 timeout /t 5

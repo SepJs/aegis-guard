@@ -23,8 +23,8 @@ export default function InstallModal({ onClose }: { onClose: () => void }) {
     }
   }, []);
 
-  const linuxCmd = "curl -sSL https://raw.githubusercontent.com/vladimir-unknown/aegis-guard/main/installers/auto-install.sh | sudo bash";
-  const winCmd = "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm https://raw.githubusercontent.com/vladimir-unknown/aegis-guard/main/installers/install-windows.ps1 | iex\"";
+  const linuxCmd = "curl -sSL https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/auto-install.sh | sudo bash";
+  const winCmd = "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/install-windows.ps1 | iex\"";
 
   const handleCopy = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
@@ -65,10 +65,10 @@ export default function InstallModal({ onClose }: { onClose: () => void }) {
     let content = "";
     if (os === "windows") {
       filename = "1-CLICK-INSTALL-WINDOWS.bat";
-      content = `@echo off\r\ntitle Aegis-Guard 1-Click Installer\r\nnet session >nul 2>&1\r\nif %errorLevel% neq 0 (\r\n  powershell -NoProfile -Command "Start-Process '%~f0' -Verb RunAs"\r\n  exit /b\r\n)\r\necho [+] Administrator privileges confirmed.\r\npowershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/vladimir-unknown/aegis-guard/main/installers/install-windows.ps1 | iex"\r\npause\r\n`;
+      content = `@echo off\r\ntitle Aegis-Guard 1-Click Installer\r\nnet session >nul 2>&1\r\nif %errorLevel% neq 0 (\r\n  powershell -NoProfile -Command "Start-Process '%~f0' -Verb RunAs"\r\n  exit /b\r\n)\r\necho [+] Administrator privileges confirmed.\r\npowershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/install-windows.ps1 | iex"\r\npause\r\n`;
     } else {
       filename = "auto-install.sh";
-      content = `#!/usr/bin/env bash\r\nif [ $EUID -ne 0 ]; then exec sudo bash "$0" "$@"; fi\r\necho "[+] Root access confirmed. Installing Aegis-Guard..."\r\ncurl -sSL https://raw.githubusercontent.com/vladimir-unknown/aegis-guard/main/installers/auto-install.sh | bash\r\n`;
+      content = `#!/usr/bin/env bash\r\nif [ $EUID -ne 0 ]; then exec sudo bash "$0" "$@"; fi\r\necho "[+] Root access confirmed. Installing Aegis-Guard..."\r\ncurl -sSL https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/auto-install.sh | bash\r\n`;
     }
 
     const blob = new Blob([content], { type: "text/plain" });
