@@ -1,5 +1,6 @@
 import { createContext, useContext } from "react";
 import type { ProcessNode, ProcEvent } from "../types";
+import { aegisSecurityEngine } from "../lib/engine/securityEngine";
 
 export interface ProcessStore { nodes: Map<number, ProcessNode>; anomalies: number[]; openCount: number }
 
@@ -36,7 +37,43 @@ export function processReducer(state: ProcessStore, action: StoreAction): Proces
   }
 }
 
-export const initialStore: ProcessStore = { nodes: new Map(), anomalies: [], openCount: 0 };
+function createInitialStore(): ProcessStore {
+  const initialNodes = new Map<number, ProcessNode>();
+  const initialAnomalies: number[] = [];
+  try {
+    const procs = aegisSecurityEngine.getInitialProcesses();
+    for (const ev of procs) {
+      const node: ProcessNode = {
+        ...ev,
+        children: [],
+        flagged: ev.anomaly !== null && ev.anomaly !== undefined,
+        seenAt: Date.now(),
+      };
+      initialNodes.set(ev.pid, node);
+      if (ev.anomaly) {
+        initialAnomalies.push(ev.pid);
+      }
+    }
+    for (const [, node] of initialNodes.entries()) {
+      if (node.ppid && initialNodes.has(node.ppid)) {
+        const parent = initialNodes.get(node.ppid)!;
+        if (!parent.children.some((c) => c.pid === node.pid)) {
+          parent.children.push(node);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("Could not pre-seed initial processes:", err);
+  }
+
+  return {
+    nodes: initialNodes,
+    anomalies: initialAnomalies,
+    openCount: initialAnomalies.length,
+  };
+}
+
+export const initialStore: ProcessStore = createInitialStore();
 
 export const ProcessStoreContext = createContext<{ store: ProcessStore; dispatch: React.Dispatch<StoreAction> } | null>(null);
 

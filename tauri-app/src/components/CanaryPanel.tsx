@@ -33,6 +33,38 @@ export default function CanaryPanel() {
       <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 8 }}>
         <div style={{ fontSize: 9, color: "var(--tx2)", letterSpacing: ".1em", textTransform: "uppercase" }}>Embed Canary Token in File</div>
         <div style={{ fontSize: 10, color: "var(--tx2)", lineHeight: 1.6 }}>A unique token is embedded in your file as a comment. If this token appears in outbound network traffic, data exfiltration is detected.</div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <button
+            className="sm-btn"
+            style={{ fontSize: 9, padding: "2px 7px" }}
+            onClick={() => {
+              setFilePath("/home/user/.ssh/id_rsa_backup");
+              setDesc("SSH Private Key Decoy Honeytoken");
+            }}
+          >
+            + Template: SSH Key Trap
+          </button>
+          <button
+            className="sm-btn"
+            style={{ fontSize: 9, padding: "2px 7px" }}
+            onClick={() => {
+              setFilePath("/home/user/.aws/credentials");
+              setDesc("AWS Secret Access Key Honeypot");
+            }}
+          >
+            + Template: AWS Secret Trap
+          </button>
+          <button
+            className="sm-btn"
+            style={{ fontSize: 9, padding: "2px 7px" }}
+            onClick={() => {
+              setFilePath("/etc/database_prod.env");
+              setDesc("Production DB Credentials Decoy");
+            }}
+          >
+            + Template: DB Credentials Trap
+          </button>
+        </div>
         <input className="search-input" style={{ width: "100%" }} placeholder="File path — e.g. /home/user/.ssh/config" value={filePath} onChange={e => setFilePath(e.target.value)} />
         <input className="search-input" style={{ width: "100%" }} placeholder="Description — e.g. SSH config canary" value={desc} onChange={e => setDesc(e.target.value)} />
         {error && <div style={{ fontSize: 10, color: "var(--redl)" }}>{error}</div>}

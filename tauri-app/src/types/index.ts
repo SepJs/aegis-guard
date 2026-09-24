@@ -1,6 +1,6 @@
 export type Confidence = "high" | "medium" | "low";
 export type Severity = "critical" | "high" | "medium" | "low" | "informational";
-export type ProcKind = "spawned" | "exited" | "anomaly";
+export type ProcKind = "spawned" | "exited" | "anomaly" | "fork" | "exec" | "snapshot";
 
 export interface ScoreFactor {
   name: string;
@@ -48,6 +48,7 @@ export interface ProcEvent {
   start_time: number;
   anomaly: AnomalyDetail | null;
   ts: number;
+  is_quarantined?: boolean;
 }
 
 export interface ThreatIncident {

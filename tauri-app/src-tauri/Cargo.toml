@@ -29,6 +29,7 @@ behavioral     = { path = "../../crates/behavioral" }
 deception      = { path = "../../crates/deception" }
 self-protect   = { path = "../../crates/self-protect" }
 process-engine = { path = "../../crates/process-engine" }
+ebpf-filter    = { path = "../../crates/ebpf-filter" }
 
 tauri          = { version = "2", features = [] }
 

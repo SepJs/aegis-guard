@@ -85,20 +85,20 @@ Aegis-Guard operates with zero mock dependencies:
 
 ## Installation Guide
 
-### Option A: Linux Automated 1-Click Install (Recommended)
+### Option A: Linux Automated & Interactive Install (Recommended)
 
 Run the automated installer script:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/auto-install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/linux/auto-install.sh | sudo bash
 ```
 
-Or from a local clone:
+Or from a local clone using the interactive terminal installer:
 
 ```bash
 git clone https://github.com/SepJs/aegis-guard.git
 cd aegis-guard
-sudo bash installers/install-linux.sh
+sudo bash installers/linux/install-linux.sh
 ```
 
 **What the Linux installer does:**
@@ -112,7 +112,7 @@ sudo bash installers/install-linux.sh
 
 To uninstall:
 ```bash
-sudo bash installers/uninstall-linux.sh
+sudo bash installers/linux/uninstall-linux.sh
 ```
 
 ---
@@ -122,12 +122,16 @@ sudo bash installers/uninstall-linux.sh
 Open an **Elevated PowerShell** (Run as Administrator):
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/install-windows.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/windows/install-windows.ps1 | iex"
 ```
 
 Or run the 1-click batch file:
-1. Right-click `installers\1-CLICK-INSTALL-WINDOWS.bat`
-2. Select **"Run as administrator"**
+1. Double-click `1-CLICK-INSTALL-WINDOWS.bat` (or `installers\windows\install-windows.bat`)
+2. Allow UAC Administrator prompt when prompted.
+
+**Windows Inno Setup & NSIS Compilers:**
+- Inno Setup 6 Script: `installers/windows/aegis-setup.iss`
+- NSIS Script: `installers/windows/AegisGuard.nsi`
 
 **What the Windows installer does:**
 1. Requests UAC administrative elevation.

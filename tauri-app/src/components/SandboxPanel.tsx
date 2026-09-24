@@ -183,9 +183,14 @@ export default function SandboxPanel() {
             CONTAINED SAMPLE JAILS ({reports.length})
           </div>
 
-          {reports.map((r) => {
-            const isSelected = r.jail_id === selectedJailId;
-            return (
+          {reports.length === 0 ? (
+            <div style={{ padding: "20px 14px", color: "var(--tx2)", fontSize: 11, textAlign: "center" }}>
+              No contained jails active. Enter a binary or script path above to launch a sandbox jail.
+            </div>
+          ) : (
+            reports.map((r) => {
+              const isSelected = r.jail_id === selectedJailId;
+              return (
               <div
                 key={r.jail_id}
                 onClick={() => setSelectedJailId(r.jail_id)}
@@ -229,7 +234,8 @@ export default function SandboxPanel() {
                 </div>
               </div>
             );
-          })}
+          })
+        )}
         </div>
 
         {/* Right Area: Deep Behavioral Analysis & Blueprint */}

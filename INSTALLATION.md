@@ -1,91 +1,124 @@
 # Aegis-Guard Cross-Platform Deployment & Native Installation Guide
 
 Aegis-Guard is an endpoint and network security defense suite engineered in **Rust, Go, and React/TypeScript (Tauri v2)**.
-It does not require a browser or web server when installed locally; it runs directly as a native system daemon with root/administrator capabilities and a hardware-accelerated desktop UI.
+It runs as a native system daemon with root/administrator capabilities, in-kernel eBPF socket filters, and a hardware-accelerated desktop UI.
+
+### ⚡ Architecture: Direct In-Memory Native Runtime (Zero Localhost Web Server)
+- **No Localhost Dependency:** Unlike web wrappers, the frontend assets are compiled and embedded directly inside the native binary (`tauri-app/dist` -> Rust executable).
+- **Direct IPC / Memory Pointers:** IPC between the UI and security engines occurs via direct in-process pipes and native OS bindings, requiring **zero open localhost ports** and eliminating port hijacking vectors.
+- **Embedded Webview:** Renders natively via Microsoft Edge WebView2 on Windows and WebKitGTK on Linux.
+
+---
+
+## Folder Structure Overview
+
+```text
+aegis-guard/
+├── crates/                    # High-performance Rust security engines
+│   ├── process-engine/        # Process lineage & memory anomaly watcher
+│   ├── ebpf-filter/           # In-kernel eBPF socket filter (SO_ATTACH_BPF)
+│   ├── behavioral/            # Multi-stage killchain & risk scoring
+│   ├── active-defense/        # Mitigation, process isolation & quarantine
+│   ├── threat-intel/          # Real-time IOC feeds & local bloom filter
+│   ├── deception/             # Honeypot decoy canaries & tripwires
+│   ├── entropy/               # Shannon entropy payload scanner
+│   ├── journal/               # Cryptographic tamper-proof audit journal
+│   ├── updater/               # In-place binary signature verification
+│   └── installer/             # Rust native interactive installer CLI
+├── network-observer/          # Go high-throughput network IDS & packet sniffer
+├── tauri-app/                 # Desktop UI (React 18, TypeScript, Tailwind CSS, Recharts)
+├── installers/                # Dedicated platform deployment suites
+│   ├── windows/               # Windows deployment suites
+│   │   ├── aegis-setup.iss    # Official Inno Setup 6 Wizard script (Industry Standard)
+│   │   ├── AegisGuard.nsi     # Nullsoft Scriptable Install System (NSIS) script
+│   │   ├── install-windows.ps1# PowerShell automated installer with service setup
+│   │   └── install-windows.bat# Double-click UAC auto-elevating batch installer
+│   └── linux/                 # Linux deployment suites
+│       ├── install-linux.sh   # High-quality interactive console/CLI installer
+│       ├── auto-install.sh    # Non-interactive 1-liner auto installer
+│       └── uninstall-linux.sh # Complete uninstaller script
+├── resources/                 # Icons, YARA rules, signatures, decoy templates
+└── 1-CLICK-INSTALL-WINDOWS.bat# Convenience root launcher for Windows
+```
 
 ---
 
 ## 1. Linux Installation (Debian, Ubuntu, Fedora, Arch, RHEL, openSUSE)
 
-Linux systems require `root` or `sudo` to attach kernel eBPF probes, inspect unprivileged `/proc` file descriptors, and manipulate `iptables` / network namespaces.
+Linux systems require `root` or `sudo` to attach kernel eBPF probes, inspect unprivileged `/proc` file descriptors, and manipulate packet filters.
 
-### One-Command Quick Run (Zero Setup):
+### Interactive Console / CLI Installer:
+Run the high-quality interactive terminal installer:
 ```bash
-# Clone or navigate to the project directory:
-cd aegis-guard
-
-# Run the automated launcher (builds, configures permissions, and boots engine + UI):
-bash aegis.sh
+sudo bash installers/linux/install-linux.sh
 ```
 
-### Full Native System Installation (systemd service + desktop double-click launcher):
+**Features of the Linux Console Installer:**
+- **Terminal UI (TUI):** Aesthetic Unicode box-drawing banners, color-coded status pills, and progress indicators.
+- **Hardware & Distro Auto-Detection:** Automatically detects architecture (`x86_64`, `aarch64`, `armv7l`) and package manager (`apt`, `dnf`, `pacman`, `zypper`, `apk`).
+- **Interactive Profiles:**
+  1. Full Production Suite (EDR Daemon + eBPF Observer + Desktop GUI App)
+  2. Headless Server Agent (Background daemons and systemd services only)
+  3. Development Mode (Live compile & hot-reload)
+  4. Complete Uninstaller
+- **Systemd Daemon Integration:**
+  - Installs and enables `aegis-guard.service` and `aegis-observer.service` with `Restart=always`.
+- **Zero-Leak Vault Provisioning:**
+  - Configures `/var/lib/aegis-guard/quarantine` and `sandbox` with strict `0700` permissions.
+- **Desktop Application Integration:**
+  - Installs `/usr/share/applications/aegis-guard.desktop` and application launcher icon.
+
+### Non-Interactive 1-Liner (Automated Script):
 ```bash
-bash installers/install-linux.sh
+curl -fsSL https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/linux/auto-install.sh | sudo bash
 ```
-What this automated script executes:
-1. **Detects Distro & Installs Native Packages:**
-   - Debian/Ubuntu/Mint: `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libayatana-appindicator3-dev`, `libssl-dev`
-   - Fedora/RHEL: `webkit2gtk4.1-devel`, `gtk3-devel`, `libappindicator-gtk3-devel`
-   - Arch/Manjaro: `webkit2gtk-4.1`, `gtk3`, `libappindicator-gtk3`
-2. **Builds Release Binaries:**
-   - Compiles Rust workspace: `aegis-process-engine` (kernel/proc watcher)
-   - Compiles Go network observer: `aegis-network-observer` (pcap socket watcher)
-   - Compiles Tauri frontend & embeds UI into `/usr/local/bin/aegis-guard-dashboard`
-3. **Registers systemd Services:**
-   - `aegis-process-engine.service` (runs as `root` for kernel visibility)
-   - `aegis-network-observer.service` (runs as `root` for promiscuous socket capture)
-4. **Installs Desktop Launcher:**
-   - Double-clicking the **Aegis-Guard** desktop icon starts both daemons seamlessly and launches the desktop app.
+
+### Uninstallation on Linux:
+```bash
+sudo aegis-uninstall
+# or:
+sudo bash installers/linux/uninstall-linux.sh
+```
 
 ---
 
 ## 2. Windows Installation (Windows 10, 11, Windows Server)
 
-Windows installations require Administrator rights to interact with the Service Control Manager (`sc.exe`), configure Windows Advanced Firewall, and restrict quarantine ACLs.
+Windows installations require Administrator rights to interact with the Service Control Manager (`sc.exe`), configure Windows Defender Firewall, and secure quarantine directories.
 
-### Automated One-Click Install:
-Option 1 — Elevated PowerShell One-Liner (No download required):
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/install-windows.ps1 | iex"
+### Method A — Standard Inno Setup Installer (`.iss`):
+Inno Setup is the official open-source Windows installer technology used by Microsoft VS Code, Git for Windows, and Notepad++.
+To compile the installer executable:
+```cmd
+iscc installers\windows\aegis-setup.iss
 ```
+This produces a certified Windows setup wizard: `AegisGuard-Setup-x64.exe` with:
+- Standard Windows wizard pages (License, Destination folder, Desktop icon, Service configuration).
+- Automatic stop of running instances before update.
+- Windows Defender Firewall rules for the Go network observer.
+- Background service registration (`AegisProcessEngine`).
+- Clean uninstallation via Windows "Add or Remove Programs" (Control Panel).
 
-Option 2 — Double-Click Local Batch:
-1. Double-click `1-CLICK-INSTALL-WINDOWS.bat` (in the root or `installers/` folder).
+### Method B — Nullsoft Scriptable Install System (`.nsi`):
+Compile with NSIS:
+```cmd
+makensis installers\windows\AegisGuard.nsi
+```
+Generates `AegisGuard-Setup-NSIS-x64.exe`.
+
+### Method C — Automated 1-Click PowerShell / Batch Install:
+1. Double-click `1-CLICK-INSTALL-WINDOWS.bat` from the root directory or run:
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/windows/install-windows.ps1 | iex"
+```
 2. Accept the Windows UAC Administrator prompt.
-
-What the Windows installer executes:
-1. **Elevates Privileges:** Automatically triggers UAC elevation if not already running as Admin.
-2. **Verifies Evergreen WebView2:** Ensures the Microsoft WebView2 runtime is present (downloads and silently installs it if missing).
-3. **Deploys Dashboard Assets & Native Executable:**
-   - Installs the full production dashboard to `C:\Program Files\Aegis-Guard\resources\app\dist`.
-   - Deploys `C:\Program Files\Aegis-Guard\Aegis-Guard.exe` (with pre-built release or native Windows host compiler).
-4. **Provisions Secure Paths:**
-   - Creates `C:\ProgramData\Aegis-Guard` for database logs, honeypot canaries, and audit logs.
-   - Creates `C:\ProgramData\Aegis-Guard\quarantine` with strict `icacls` (read/write restricted exclusively to `SYSTEM` and `Administrators`, execution stripped).
-5. **Configures Packet Inspection & Firewall:**
-   - Adds loopback filtering rules for local IPC telemetry.
-6. **Registers Windows Service:**
-   - Installs `AegisGuardService` with auto-restart recovery on failure.
-7. **Creates Verified Shortcuts:**
-   - Installs Desktop and Start Menu shortcuts pointing directly to `Aegis-Guard.exe`.
-8. **Instant Launch:**
-   - Automatically starts the application window and arms endpoint defense.
+The script automatically builds release binaries, registers Windows Services, creates Start Menu & Desktop shortcuts, and launches the application.
 
 ---
 
-## 3. Architecture & Engine Verification
+## 3. Verification & Diagnostics
 
-| Component | Technology | Privilege | Real OS Interaction |
-| :--- | :--- | :--- | :--- |
-| **Process Monitor** | Rust (`procfs` + `nix`) | `root` / `SYSTEM` | Reads `/proc`, tracks process lineage trees, kills rogue PIDs via `SIGTERM`/`SIGKILL` |
-| **Network Observer** | Go (`gopacket` / `pcap`) | `root` / `SYSTEM` | Sniffs raw sockets, detects ARP poisoning, DNS tunnels, and SYN flood attacks |
-| **Active Defense** | Rust (`rusqlite` + `blake3`) | `root` / `SYSTEM` | Enforces namespace isolation (`nsenter`), writes tamper-evident cryptographic hash chains |
-| **Shannon Forensics** | Rust (`entropy`) | User / Admin | Reads local files from disk, calculates mathematical entropy (0.0 to 8.0) to spot encrypted payloads |
-| **Desktop UI** | Tauri v2 + React | User | Renders via native WebKitGTK (Linux) or WebView2 (Windows), communicating over local IPC sockets |
-
-To build the native binary package for distribution (`.deb`, `.rpm`, or `.msi` / `.exe`):
-```bash
-cd tauri-app
-cargo tauri build
-```
-The resulting installers will be generated under `tauri-app/src-tauri/target/release/bundle/`.
+After installation, verify that all security subsystems are operating at 100% integrity:
+- **GUI:** Navigate to `Settings` -> Click **`⚡ RUN FULL ENGINE SELF-TEST`** (evaluates all 11 security engines).
+- **Linux CLI:** `systemctl status aegis-guard.service aegis-observer.service`
+- **Windows CLI:** `sc.exe query AegisProcessEngine`

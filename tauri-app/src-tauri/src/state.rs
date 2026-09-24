@@ -9,11 +9,13 @@
 // Mutex), and all its methods take &self. Wrapping it again would force
 // any async command awaiting while holding the guard to become non-Send.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use active_defense::ResponseEngine;
+use ebpf_filter::EbpfFilterManager;
 use journal::Journal;
 
 pub struct AppState {
     pub journal:         Mutex<Journal>,
     pub response_engine: ResponseEngine,
+    pub ebpf_manager:    Arc<EbpfFilterManager>,
 }

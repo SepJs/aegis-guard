@@ -14,8 +14,29 @@ export default function AuditLogPanel() {
 
   async function verifyChain() {
     setVerifying(true);
-    try { const errs = await invoke<string[]>("verify_audit_chain"); setChainErrs(errs); setChainOk(errs.length === 0); }
-    catch (e) { setChainOk(false); setChainErrs([String(e)]); } finally { setVerifying(false); }
+    try {
+      const res = await invoke<any>("verify_audit_chain");
+      const errs = Array.isArray(res) ? res : (res?.errors || []);
+      setChainErrs(errs);
+      setChainOk(errs.length === 0);
+    } catch (e) {
+      setChainOk(false);
+      setChainErrs([String(e)]);
+    } finally {
+      setVerifying(false);
+    }
+  }
+
+  async function simulateDefenseAction() {
+    try {
+      await invoke("simulate_audit_action");
+      const updated = await invoke<AuditEntry[]>("list_audit_log", { limit: 100, offset: 0 });
+      setEntries(updated);
+      setChainOk(null);
+      setChainErrs([]);
+    } catch (e) {
+      console.error(e);
+    }
   }
 
   const statusColor = (s: string) => s === "success" ? "var(--teall)" : s === "failed" ? "var(--redl)" : "var(--amberl)";
@@ -27,7 +48,14 @@ export default function AuditLogPanel() {
         <span className="pstat">{entries.length} ENTRIES</span>
         {chainOk === true && <span className="pstat" style={{borderColor:"var(--teal)",color:"var(--teall)"}}>✓ HASH CHAIN INTACT</span>}
         {chainOk === false && <span className="pstat pstat--warn">⚠ CHAIN BROKEN</span>}
-        <div className="toolbar-right"><button className="sm-btn" onClick={verifyChain} disabled={verifying}>{verifying ? "VERIFYING…" : "VERIFY CHAIN INTEGRITY"}</button></div>
+        <div className="toolbar-right" style={{ display: "flex", gap: 8 }}>
+          <button className="sm-btn" onClick={simulateDefenseAction} title="Simulate a defensive quarantine event and compute BLAKE3 hash">
+            ⚡ SIMULATE ACTIVE DEFENSE
+          </button>
+          <button className="sm-btn" onClick={verifyChain} disabled={verifying}>
+            {verifying ? "VERIFYING…" : "VERIFY CHAIN INTEGRITY"}
+          </button>
+        </div>
       </div>
       {chainErrs.length > 0 && <div style={{ margin: "8px 14px", padding: "8px 12px", background: "var(--redd)", border: "1px solid var(--red)", borderRadius: 4, fontSize: 10, color: "var(--redl)" }}>{chainErrs.map((e, i) => <div key={i}>{e}</div>)}</div>}
       <div style={{ display: "grid", gridTemplateColumns: "80px 110px 60px 80px 1fr 70px", padding: "4px 14px", fontSize: 9, color: "var(--tx2)", letterSpacing: ".08em", textTransform: "uppercase", borderBottom: "1px solid var(--border)", background: "var(--bg1)", flexShrink: 0 }}>

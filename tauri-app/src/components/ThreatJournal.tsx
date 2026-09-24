@@ -75,13 +75,29 @@ export default function ThreatJournal() {
   const open = filtered.filter((i) => !i.resolved);
   const closed = filtered.filter((i) => i.resolved);
 
+  async function handleSimulateIncident() {
+    try {
+      await invoke("simulate_threat_incident");
+      await load(0);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
   return (
     <div className="panel">
       <div className="panel-header">
         <span className="panel-title">THREAT JOURNAL2 & INCIDENTS</span>
         {open.length > 0 && <span className="pstat pstat--warn">{open.length} ACTIVE INCIDENTS</span>}
         <span className="pstat">MULTI-TIER EVALUATED</span>
-        <div className="toolbar-right">
+        <div className="toolbar-right" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button
+            className="sm-btn"
+            onClick={handleSimulateIncident}
+            title="Inject simulated C2 interactive shell incident into Threat Journal"
+          >
+            ⚡ SIMULATE THREAT INCIDENT
+          </button>
           <button className="sm-btn" onClick={() => doExport("markdown")} disabled={exporting || !incidents.length}>
             EXPORT .MD
           </button>

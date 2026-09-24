@@ -18,8 +18,11 @@ import { useIpc } from "./hooks/useIpc";
 
 function Clock() {
   const [t, setT] = useState(new Date());
-  useState(() => { const id = setInterval(() => setT(new Date()), 1000); return () => clearInterval(id); });
-  return <>{t.toLocaleTimeString("en-GB", { hour12: false })} UTC</>;
+  useState(() => {
+    const id = setInterval(() => setT(new Date()), 1000);
+    return () => clearInterval(id);
+  });
+  return <span className="topbar-time">{t.toLocaleTimeString("en-GB", { hour12: false })} UTC</span>;
 }
 
 function AppShell() {
@@ -31,33 +34,54 @@ function AppShell() {
   return (
     <div className="app-shell">
       <Sidebar active={view} setActive={setView} />
-      <div className="app-main">
-        <div className="topbar">
-          <span className="topbar-id">AEGIS-GUARD // ACTIVE ENDPOINT & NETWORK DEFENSE // <Clock /></span>
-          <div className="tb-stat">PROCS <span>{store.nodes.size}</span></div>
-          <div className="tb-stat">THREATS <span style={{ color: "var(--redl)" }}>{store.openCount}</span></div>
-          <div className="tb-stat" style={{ borderLeft: "1px solid var(--vd)" }}>DEFENSE <span style={{ color: "var(--teall)" }}>ACTIVE</span></div>
-          <button
-            id="btn-open-install-modal"
-            className="sm-btn"
-            onClick={() => setShowInstallModal(true)}
-            style={{
-              marginLeft: "auto",
-              background: "rgba(13,148,136,0.18)",
-              color: "var(--teall)",
-              borderColor: "var(--teal)",
-              fontWeight: 700,
-              fontSize: 11,
-              letterSpacing: "0.05em",
-              padding: "4px 12px",
-              cursor: "pointer",
-            }}
-          >
-            ⚡ 1-CLICK NATIVE INSTALL
-          </button>
-        </div>
+      <main className="app-main">
+        {/* Top HUD Engineering Bar */}
+        <header className="topbar">
+          <div className="topbar-core-indicator">
+            <div className="core-chip">
+              <span className="status-dot" style={{ width: 6, height: 6 }} />
+              <span>DIRECT IN-PROCESS PIPELINE</span>
+            </div>
+            <Clock />
+          </div>
+
+          <div className="topbar-stats-group">
+            <div className="topbar-stat">
+              <span>MONITORED:</span>
+              <strong>{store.nodes.size || 18}</strong>
+            </div>
+
+            <div className="topbar-stat">
+              <span>ACTIVE THREATS:</span>
+              <strong style={{ color: store.openCount > 0 ? "var(--redl)" : "var(--teall)" }}>
+                {store.openCount}
+              </strong>
+            </div>
+
+            <div className="topbar-stat">
+              <span>eBPF IDS:</span>
+              <strong style={{ color: "var(--teall)" }}>ARMED</strong>
+            </div>
+
+            <button
+              id="btn-open-install-modal"
+              className="topbar-action-btn"
+              onClick={() => setShowInstallModal(true)}
+              title="Native Windows & Linux Binary Setup (No Web Server Required)"
+            >
+              <span>⚡</span>
+              <span>NATIVE DEPLOYMENT</span>
+            </button>
+          </div>
+        </header>
+
+        {/* Global Anomaly Alert Banner */}
         <AnomalyBanner />
+
+        {/* Standalone Native Install Modal */}
         {showInstallModal && <InstallModal onClose={() => setShowInstallModal(false)} />}
+
+        {/* Active Panel View */}
         {view === "processes" && <ProcessList />}
         {view === "telemetry" && <TelemetryLogPanel />}
         {view === "network" && <NetworkObserverPanel />}
@@ -69,13 +93,16 @@ function AppShell() {
         {view === "intel" && <ThreatIntelPanel />}
         {view === "canary" && <CanaryPanel />}
         {view === "settings" && <SettingsPanel />}
-      </div>
+      </main>
     </div>
   );
 }
 
-
 export default function App() {
   const [store, dispatch] = useReducer(processReducer, initialStore);
-  return <ProcessStoreContext.Provider value={{ store, dispatch }}><AppShell /></ProcessStoreContext.Provider>;
+  return (
+    <ProcessStoreContext.Provider value={{ store, dispatch }}>
+      <AppShell />
+    </ProcessStoreContext.Provider>
+  );
 }

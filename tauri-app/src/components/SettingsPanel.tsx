@@ -84,6 +84,7 @@ export default function SettingsPanel() {
 
   // Status message
   const [savedMsg, setSavedMsg] = useState(false);
+  const [diagResult, setDiagResult] = useState<any>(null);
 
   // Storage & Pruner Utility state
   const [storageStats, setStorageStats] = useState<StorageStats | null>(null);
@@ -767,6 +768,65 @@ export default function SettingsPanel() {
                   No temporary files or scratch dumps found. Application directory is completely clean.
                 </div>
               )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Engine Diagnostics & System Self-Test Section */}
+      <div style={{ marginBottom: 28, background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: "var(--r)", padding: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 14, color: "var(--teall)" }}>🛡️</span>
+            <div>
+              <h2 style={{ fontSize: 13, fontWeight: 700, color: "var(--tx0)", letterSpacing: "0.05em", margin: 0 }}>
+                ENGINE DIAGNOSTICS & SUBSYSTEM INTEGRITY TEST
+              </h2>
+              <p style={{ fontSize: 11, color: "var(--tx2)", margin: "3px 0 0" }}>
+                Verify end-to-end functionality of all 11 Aegis security engines and heuristics
+              </p>
+            </div>
+          </div>
+          <button
+            className="action-btn"
+            onClick={async () => {
+              try {
+                const res = await invoke<any>("run_engine_diagnostics");
+                setDiagResult(res);
+              } catch (e) {
+                console.error(e);
+              }
+            }}
+            style={{ padding: "6px 14px", fontSize: 11, fontWeight: 700 }}
+          >
+            ⚡ RUN FULL ENGINE SELF-TEST
+          </button>
+        </div>
+
+        {diagResult && (
+          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "rgba(13,148,136,0.12)", border: "1px solid var(--teal)", borderRadius: 4 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "var(--teall)" }}>
+                ✓ ALL {diagResult.engines.length} ENGINES OPERATIONAL — INTEGRITY SCORE: {diagResult.integrity_score}%
+              </span>
+              <span style={{ fontSize: 10, color: "var(--tx2)" }}>
+                Executed at {new Date(diagResult.timestamp).toLocaleTimeString()}
+              </span>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 8 }}>
+              {diagResult.engines.map((eng: any, idx: number) => (
+                <div key={idx} style={{ padding: "8px 12px", background: "var(--bg0)", border: "1px solid var(--border)", borderRadius: 4, display: "flex", flexDirection: "column", gap: 3 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "var(--tx0)" }}>{eng.name}</span>
+                    <span style={{ fontSize: 9, fontWeight: 700, color: "var(--teall)", padding: "1px 6px", background: "rgba(13,148,136,0.15)", borderRadius: 3 }}>
+                      {eng.status}
+                    </span>
+                  </div>
+                  <span style={{ fontSize: 10, color: "var(--tx2)" }}>{eng.metrics}</span>
+                  <span style={{ fontSize: 9, color: "var(--vl)", fontFamily: "var(--mono)" }}>Latency: {eng.latency_ms} ms</span>
+                </div>
+              ))}
             </div>
           </div>
         )}

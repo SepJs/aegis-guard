@@ -10,8 +10,9 @@ members = [
     "crates/behavioral",
     "crates/deception",
     "crates/self-protect",
+    "crates/ebpf-filter",
+    "crates/installer",
     "tauri-app/src-tauri",
-    "installer",
 ]
 resolver = "2"
 

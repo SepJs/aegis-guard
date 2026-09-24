@@ -20,7 +20,25 @@ export function useIpc() {
           const currentPids = new Set<number>();
           for (const p of procs) {
             currentPids.add(p.pid);
-            dispatch({ type: "UPSERT", event: p });
+            dispatch({
+              type: "UPSERT",
+              event: {
+                id: p.id || `proc-${p.pid}`,
+                kind: p.kind || "snapshot",
+                pid: p.pid,
+                ppid: p.ppid ?? 0,
+                name: p.name || `pid-${p.pid}`,
+                exe: p.exe ?? null,
+                cmdline: p.cmdline && p.cmdline.length ? p.cmdline : [p.name || `pid-${p.pid}`],
+                cwd: p.cwd ?? null,
+                uid: p.uid ?? 1000,
+                gid: p.gid ?? 1000,
+                start_time: p.start_time ?? Date.now(),
+                ts: p.ts || Date.now(),
+                is_quarantined: p.is_quarantined,
+                anomaly: p.anomaly ?? null,
+              },
+            });
           }
 
           // Clean up exited processes

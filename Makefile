@@ -25,7 +25,7 @@ fix:
 install: release
 	mkdir -p target
 	cd network-observer && go build -o ../target/aegis-network-observer ./cmd/observer
-	sudo bash install/setup.sh
+	sudo bash installers/linux/install-linux.sh
 	sudo install -m 755 target/release/aegis-process-engine /usr/local/bin/
 	sudo install -m 755 target/aegis-network-observer /usr/local/bin/
 

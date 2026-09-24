@@ -1112,4 +1112,168 @@ pub fn trigger_canary_test(token_id: String, state: State<'_, Arc<AppState>>, ap
     }))
 }
 
+// ── eBPF Socket Filter Commands ──────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn ebpf_init_filter(
+    interface: String,
+    mode: Option<String>,
+    state: State<'_, Arc<AppState>>,
+) -> Res<ebpf_filter::EbpfFilterStatus> {
+    let filter_mode = match mode.as_deref() {
+        Some("all") => ebpf_filter::FilterMode::PassAll,
+        Some("tcp") => ebpf_filter::FilterMode::TcpOnly,
+        Some("udp") => ebpf_filter::FilterMode::UdpOnly,
+        Some("custom") => ebpf_filter::FilterMode::Custom,
+        _ => ebpf_filter::FilterMode::ThreatPortsOnly,
+    };
+    state
+        .ebpf_manager
+        .init_filter(&interface, Some(filter_mode))
+        .await
+        .map_err(je)
+}
+
+#[tauri::command]
+pub async fn ebpf_attach_filter(state: State<'_, Arc<AppState>>) -> Res<()> {
+    state.ebpf_manager.attach_filter().await.map_err(je)
+}
+
+#[tauri::command]
+pub async fn ebpf_detach_filter(state: State<'_, Arc<AppState>>) -> Res<()> {
+    state.ebpf_manager.detach_filter().await.map_err(je)
+}
+
+#[tauri::command]
+pub async fn ebpf_get_status(state: State<'_, Arc<AppState>>) -> Res<ebpf_filter::EbpfFilterStatus> {
+    Ok(state.ebpf_manager.get_status().await)
+}
+
+#[tauri::command]
+pub async fn ebpf_list_rules(state: State<'_, Arc<AppState>>) -> Res<Vec<ebpf_filter::EbpfRule>> {
+    Ok(state.ebpf_manager.list_rules().await)
+}
+
+#[tauri::command]
+pub async fn ebpf_add_rule(
+    rule: ebpf_filter::EbpfRule,
+    state: State<'_, Arc<AppState>>,
+) -> Res<()> {
+    state.ebpf_manager.add_rule(rule).await.map_err(je)
+}
+
+#[tauri::command]
+pub async fn ebpf_remove_rule(
+    rule_id: String,
+    state: State<'_, Arc<AppState>>,
+) -> Res<bool> {
+    state.ebpf_manager.remove_rule(&rule_id).await.map_err(je)
+}
+
+#[tauri::command]
+pub async fn ebpf_toggle_rule(
+    rule_id: String,
+    enabled: bool,
+    state: State<'_, Arc<AppState>>,
+) -> Res<bool> {
+    state.ebpf_manager.toggle_rule(&rule_id, enabled).await.map_err(je)
+}
+
+#[tauri::command]
+pub async fn ebpf_get_inspected_packets(
+    limit: Option<usize>,
+    filter_verdict: Option<String>,
+    state: State<'_, Arc<AppState>>,
+) -> Res<Vec<ebpf_filter::ParsedPacket>> {
+    Ok(state
+        .ebpf_manager
+        .get_inspected_packets(limit.unwrap_or(100), filter_verdict)
+        .await)
+}
+
+#[tauri::command]
+pub async fn ebpf_clear_packets(state: State<'_, Arc<AppState>>) -> Res<()> {
+    state.ebpf_manager.clear_packets().await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn ebpf_simulate_packet(
+    sample_type: Option<String>,
+    custom_hex: Option<String>,
+    state: State<'_, Arc<AppState>>,
+    app: AppHandle,
+) -> Res<ebpf_filter::ParsedPacket> {
+    // Generate synthetic Ethernet + IP + TCP/UDP frames for testing filter logic
+    let raw_bytes: Vec<u8> = if let Some(hex) = custom_hex {
+        let clean = hex.replace(" ", "").replace("\n", "");
+        (0..clean.len())
+            .step_by(2)
+            .filter_map(|i| u8::from_str_radix(&clean[i..i + 2], 16).ok())
+            .collect()
+    } else {
+        match sample_type.as_deref() {
+            Some("c2_reverse_shell") => {
+                // Synthesize IPv4 (192.168.1.50 -> 45.33.32.156) TCP port 4444 with reverse shell payload
+                let mut pkt = vec![
+                    // Ethernet header (14 bytes)
+                    0x00, 0x0c, 0x29, 0x6d, 0x51, 0x77, 0x00, 0x50, 0x56, 0xc0, 0x00, 0x08, 0x08, 0x00,
+                    // IPv4 header (20 bytes)
+                    0x45, 0x00, 0x00, 0x3c, 0x1c, 0x46, 0x40, 0x00, 0x40, 0x06, 0x00, 0x00,
+                    192, 168, 1, 50, // Src IP
+                    45, 33, 32, 156, // Dst IP
+                    // TCP header (20 bytes)
+                    0xd2, 0x11, // Src Port 53777
+                    0x11, 0x5c, // Dst Port 4444
+                    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+                    0x50, 0x18, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+                ];
+                // Payload: shell prompt connection
+                pkt.extend_from_slice(b"/bin/sh -i <&3 >&3 2>&3\n");
+                pkt
+            }
+            Some("dns_tunneling") => {
+                // Synthesize IPv4 UDP to port 53 with high-entropy base64 subdomain payload
+                let mut pkt = vec![
+                    0x00, 0x0c, 0x29, 0x6d, 0x51, 0x77, 0x00, 0x50, 0x56, 0xc0, 0x00, 0x08, 0x08, 0x00,
+                    0x45, 0x00, 0x00, 0x50, 0x2b, 0x12, 0x00, 0x00, 0x40, 0x11, 0x00, 0x00,
+                    192, 168, 1, 50,
+                    8, 8, 8, 8,
+                    // UDP header (8 bytes)
+                    0xc4, 0x10, // Src Port 50192
+                    0x00, 0x35, // Dst Port 53
+                    0x00, 0x3c, 0x00, 0x00,
+                ];
+                pkt.extend_from_slice(b"W91cnNlY3JldGRhdGExMjM0NTY3ODkwYWJjZGVmZ2hpams.c2.badactor.io");
+                pkt
+            }
+            _ => {
+                // Benign HTTPS packet (TCP 443)
+                let mut pkt = vec![
+                    0x00, 0x0c, 0x29, 0x6d, 0x51, 0x77, 0x00, 0x50, 0x56, 0xc0, 0x00, 0x08, 0x08, 0x00,
+                    0x45, 0x00, 0x00, 0x34, 0x3a, 0x9f, 0x40, 0x00, 0x40, 0x06, 0x00, 0x00,
+                    192, 168, 1, 50,
+                    142, 250, 180, 206,
+                    0xe1, 0x20, // Src Port 57632
+                    0x01, 0xbb, // Dst Port 443
+                    0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00,
+                    0x50, 0x10, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+                ];
+                pkt.extend_from_slice(b"TLS Client Hello\0");
+                pkt
+            }
+        }
+    };
+
+    let inspected = state.ebpf_manager.inspect_packet(&raw_bytes).await;
+
+    // Emit event if threat detected
+    if inspected.verdict == ebpf_filter::PacketVerdict::Drop || inspected.verdict == ebpf_filter::PacketVerdict::Alert {
+        let _ = app.emit("ebpf-threat-detected", &inspected);
+    }
+
+    Ok(inspected)
+}
+
+
 

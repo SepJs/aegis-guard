@@ -48,6 +48,15 @@ export default function DebugLogPanel() {
     }
   }
 
+  async function handleTestSuppression() {
+    try {
+      await invoke("simulate_suppression_test");
+      await load(0);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
   const filtered = entries.filter((e) => {
     if (!search) return true;
     const q = search.toLowerCase();
@@ -73,7 +82,27 @@ export default function DebugLogPanel() {
         <span className="pstat" style={{ color: "var(--teall)", borderColor: "var(--teal)" }}>
           AUTO-TUNED SENSITIVITY
         </span>
-        <div className="toolbar-right">
+        <div className="toolbar-right" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button
+            onClick={handleTestSuppression}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 5,
+              padding: "4px 10px",
+              background: "rgba(13,148,136,0.15)",
+              border: "1px solid var(--teal)",
+              borderRadius: "var(--r)",
+              color: "var(--teall)",
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: "0.05em",
+              cursor: "pointer",
+            }}
+            title="Simulate benign developer activity suppressed by smart sensitivity filter"
+          >
+            <span>⚡ TEST DEV SUPPRESSION</span>
+          </button>
           <button
             id="btn-quick-prune-debug-logs"
             onClick={handleQuickPrune}

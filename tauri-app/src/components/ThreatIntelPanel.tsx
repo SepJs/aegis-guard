@@ -9,14 +9,40 @@ export default function ThreatIntelPanel() {
   const [query, setQuery] = useState("");
   const [result, setResult] = useState<IocMatch | null | "clean">(null);
   const [loading, setLoading] = useState(false);
+  const [customIoc, setCustomIoc] = useState("");
+  const [customType, setCustomType] = useState<"ip" | "domain" | "hash">("ip");
+  const [customThreat, setCustomThreat] = useState("apt_malware_c2");
+  const [customAddedMsg, setCustomAddedMsg] = useState<string | null>(null);
 
   useEffect(() => { invoke<IocStats>("get_ioc_stats").then(setStats).catch(console.error); }, []);
 
-  async function lookup() {
-    if (!query.trim()) return;
+  async function lookup(val?: string) {
+    const target = (val || query).trim();
+    if (!target) return;
+    if (val) setQuery(val);
     setLoading(true); setResult(null);
-    try { const r = await invoke<IocMatch | null>("check_ioc_manual", { value: query.trim(), context: "manual-lookup" }); setResult(r ?? "clean"); }
+    try { const r = await invoke<IocMatch | null>("check_ioc_manual", { value: target, context: "manual-lookup" }); setResult(r ?? "clean"); }
     catch (e) { console.error(e); } finally { setLoading(false); }
+  }
+
+  async function addCustom() {
+    if (!customIoc.trim()) return;
+    try {
+      await invoke("add_custom_ioc", {
+        ioc: customIoc.trim(),
+        kind: customType,
+        threat_type: customThreat,
+        confidence: 95,
+      });
+      setCustomAddedMsg(`Added '${customIoc.trim()}' to threat feeds!`);
+      const updatedStats = await invoke<IocStats>("get_ioc_stats");
+      if (updatedStats) setStats(updatedStats);
+      lookup(customIoc.trim());
+      setCustomIoc("");
+      setTimeout(() => setCustomAddedMsg(null), 4000);
+    } catch (e) {
+      console.error(e);
+    }
   }
 
   return (
@@ -28,10 +54,26 @@ export default function ThreatIntelPanel() {
       </div>
 
       <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
-        <div style={{ fontSize: 9, color: "var(--tx2)", letterSpacing: ".1em", marginBottom: 8, textTransform: "uppercase" }}>Manual IOC Lookup</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <div style={{ fontSize: 9, color: "var(--tx2)", letterSpacing: ".1em", textTransform: "uppercase" }}>Manual IOC Lookup</div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button className="sm-btn" onClick={() => lookup("198.199.73.244")} style={{ fontSize: 9, padding: "2px 7px" }}>
+              ⚡ C2 IP (198.199...)
+            </button>
+            <button className="sm-btn" onClick={() => lookup("45.33.32.156")} style={{ fontSize: 9, padding: "2px 7px" }}>
+              ⚡ Dropper (45.33...)
+            </button>
+            <button className="sm-btn" onClick={() => lookup("evil.example.com")} style={{ fontSize: 9, padding: "2px 7px" }}>
+              ⚡ Phishing Domain
+            </button>
+            <button className="sm-btn" onClick={() => lookup("1.1.1.1")} style={{ fontSize: 9, padding: "2px 7px" }}>
+              ✓ Clean DNS (1.1.1.1)
+            </button>
+          </div>
+        </div>
         <div style={{ display: "flex", gap: 8 }}>
           <input className="search-input" style={{ flex: 1, width: "auto" }} placeholder="IP address, domain, MD5 or SHA256 hash…" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => { if (e.key === "Enter") lookup(); }} />
-          <button className="action-btn" onClick={lookup} disabled={loading || !query.trim()}>{loading ? "CHECKING…" : "CHECK"}</button>
+          <button className="action-btn" onClick={() => lookup()} disabled={loading || !query.trim()}>{loading ? "CHECKING…" : "CHECK"}</button>
         </div>
         {result && (
           <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 4, border: `1px solid ${result === "clean" ? "var(--teal)" : "var(--red)"}`, background: result === "clean" ? "rgba(13,148,136,.08)" : "rgba(220,38,38,.08)" }}>
@@ -47,6 +89,47 @@ export default function ThreatIntelPanel() {
                 <div className="meta-row"><span className="meta-label">CONFIDENCE</span><span className="meta-val">{result.confidence}%</span></div>
               </div>
             )}
+          </div>
+        )}
+      </div>
+
+      {/* Add Custom IOC */}
+      <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", background: "var(--bg0)" }}>
+        <div style={{ fontSize: 9, color: "var(--tx2)", letterSpacing: ".1em", marginBottom: 6, textTransform: "uppercase" }}>Add Custom Threat Indicator</div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <select
+            value={customType}
+            onChange={(e) => setCustomType(e.target.value as any)}
+            style={{ padding: "4px 8px", fontSize: 10, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--tx)" }}
+          >
+            <option value="ip">IP</option>
+            <option value="domain">Domain</option>
+            <option value="hash">SHA256 Hash</option>
+          </select>
+          <select
+            value={customThreat}
+            onChange={(e) => setCustomThreat(e.target.value)}
+            style={{ padding: "4px 8px", fontSize: 10, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--tx)" }}
+          >
+            <option value="apt_malware_c2">APT / C2 Server</option>
+            <option value="ransomware_dropper">Ransomware Dropper</option>
+            <option value="phishing_credential_harvest">Phishing Gateway</option>
+            <option value="crypto_miner">Cryptojacking Pool</option>
+          </select>
+          <input
+            className="search-input"
+            style={{ flex: 1, width: "auto" }}
+            placeholder="e.g. 192.168.1.99 or malware-drop.ru"
+            value={customIoc}
+            onChange={(e) => setCustomIoc(e.target.value)}
+          />
+          <button className="sm-btn" onClick={addCustom} disabled={!customIoc.trim()}>
+            + ADD & TEST IOC
+          </button>
+        </div>
+        {customAddedMsg && (
+          <div style={{ marginTop: 6, fontSize: 10, color: "var(--teall)" }}>
+            ✓ {customAddedMsg}
           </div>
         )}
       </div>
