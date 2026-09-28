@@ -10,11 +10,16 @@ use crate::models::{SelfProtectEvent, SelfProtectKind};
 const CHECK_INTERVAL_SECS: u64 = 10;
 
 pub fn read_tracer_pid() -> Result<u32> {
-    let status = std::fs::read_to_string("/proc/self/status")?;
-    for line in status.lines() {
-        if let Some(rest) = line.strip_prefix("TracerPid:\t") { return Ok(rest.trim().parse().unwrap_or(0)); }
+    #[cfg(target_os = "linux")]
+    {
+        let status = std::fs::read_to_string("/proc/self/status")?;
+        for line in status.lines() {
+            if let Some(rest) = line.strip_prefix("TracerPid:\t") { return Ok(rest.trim().parse().unwrap_or(0)); }
+        }
+        Ok(0)
     }
-    Ok(0)
+    #[cfg(not(target_os = "linux"))]
+    { Ok(0) }
 }
 
 pub async fn start_ptrace_monitor(tx: mpsc::Sender<SelfProtectEvent>) {

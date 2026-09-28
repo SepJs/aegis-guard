@@ -83,7 +83,11 @@ impl Journal {
         let mut stmt = self.conn.prepare("SELECT id, rule, pid, process, ts, note FROM debug_log ORDER BY ts DESC LIMIT ?1 OFFSET ?2")?;
         let rows = stmt.query_map(params![limit, offset], |row| {
             let ts_ms: i64 = row.get(4)?;
-            Ok(DebugEntry { id: row.get(0)?, rule: row.get(1)?, pid: row.get::<_, u32>(2)?, process: row.get(3)?, ts: Utc.timestamp_millis_opt(ts_ms).unwrap(), note: row.get(5)? })
+            Ok(DebugEntry {
+                id: row.get(0)?, rule: row.get(1)?, pid: row.get::<_, u32>(2)?, process: row.get(3)?,
+                ts: Utc.timestamp_millis_opt(ts_ms).unwrap(), note: row.get(5)?,
+                suppression_reason: None, original_score: None, adjusted_score: None, category: None,
+            })
         })?;
         rows.map(|r| r.map_err(|e| anyhow::anyhow!(e))).collect()
     }
@@ -97,6 +101,7 @@ fn row_to_incident(row: &rusqlite::Row<'_>) -> rusqlite::Result<ThreatIncident> 
     let severity_str: String = row.get(2)?;
     Ok(ThreatIncident {
         id: row.get(0)?, kind: row.get(1)?, severity: Severity::from_str(&severity_str),
+        risk_score: 0.0,
         pid: row.get::<_, u32>(3)?, ppid: row.get::<_, u32>(4)?, process: row.get(5)?,
         cmdline: serde_json::from_str(&cmdline_json).unwrap_or_default(), exe_path: row.get(7)?,
         rule: row.get(8)?, confidence: row.get(9)?, reason: row.get(10)?,

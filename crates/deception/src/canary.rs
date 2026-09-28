@@ -16,6 +16,12 @@ fn get_canary_dir() -> PathBuf {
     }
     #[cfg(not(windows))]
     {
+        if let Ok(home) = std::env::var("HOME") {
+            let p = PathBuf::from(home).join(".local/share/aegis/canaries");
+            if std::fs::create_dir_all(&p).is_ok() {
+                return p;
+            }
+        }
         PathBuf::from("/var/lib/aegis/canaries")
     }
 }

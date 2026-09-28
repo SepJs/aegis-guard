@@ -2,9 +2,19 @@
   {"ioc":"198.199.73.244","kind":"ip","feed":"bundled","threat_type":"c2_server","confidence":90,"added_ts":0},
   {"ioc":"45.33.32.156","kind":"ip","feed":"bundled","threat_type":"malware_host","confidence":85,"added_ts":0},
   {"ioc":"23.239.9.123","kind":"ip","feed":"bundled","threat_type":"c2_server","confidence":88,"added_ts":0},
+  {"ioc":"185.220.101.45","kind":"ip","feed":"bundled","threat_type":"tor_exit","confidence":80,"added_ts":0},
+  {"ioc":"91.219.237.228","kind":"ip","feed":"bundled","threat_type":"c2_server","confidence":92,"added_ts":0},
+  {"ioc":"103.27.202.101","kind":"ip","feed":"bundled","threat_type":"malware_host","confidence":87,"added_ts":0},
   {"ioc":"evil.example.com","kind":"domain","feed":"bundled","threat_type":"phishing","confidence":95,"added_ts":0},
   {"ioc":"malware.example.net","kind":"domain","feed":"bundled","threat_type":"malware_download","confidence":92,"added_ts":0},
   {"ioc":"cobalt-strike.bad","kind":"domain","feed":"bundled","threat_type":"c2_beacon","confidence":97,"added_ts":0},
+  {"ioc":"update-service.cdn-microsoft.support","kind":"domain","feed":"bundled","threat_type":"phishing","confidence":94,"added_ts":0},
+  {"ioc":"secure-login.paypal-accounts.verify","kind":"domain","feed":"bundled","threat_type":"phishing","confidence":96,"added_ts":0},
+  {"ioc":"dns-tunnel.exfil.local","kind":"domain","feed":"bundled","threat_type":"data_exfiltration","confidence":89,"added_ts":0},
   {"ioc":"44d88612fea8a8f36de82e1278abb02f","kind":"md5","feed":"bundled","threat_type":"ransomware","confidence":99,"added_ts":0},
-  {"ioc":"275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f","kind":"sha256","feed":"bundled","threat_type":"trojan","confidence":99,"added_ts":0}
+  {"ioc":"275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f","kind":"sha256","feed":"bundled","threat_type":"trojan","confidence":99,"added_ts":0},
+  {"ioc":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","kind":"sha256","feed":"bundled","threat_type":"empty_file_test","confidence":50,"added_ts":0},
+  {"ioc":"a94a8fe5ccb19ba61c4c0873d391e987982fbbd3","kind":"sha1","feed":"bundled","threat_type":"test_hash","confidence":60,"added_ts":0},
+  {"ioc":"5d41402abc4b2a76b9719d911017c592","kind":"md5","feed":"bundled","threat_type":"info_stealer","confidence":91,"added_ts":0},
+  {"ioc":"d41d8cd98f00b204e9800998ecf8427e","kind":"md5","feed":"bundled","threat_type":"empty_md5","confidence":40,"added_ts":0}
 ]

@@ -1,0 +1,19 @@
+[Unit]
+Description=Aegis-Guard Network Observer (IDS)
+Documentation=https://github.com/SepJs/aegis-guard
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/aegis-network-observer
+Restart=on-failure
+RestartSec=3
+# Raw sockets typically require elevated capabilities
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
+NoNewPrivileges=false
+ProtectSystem=strict
+ReadWritePaths=/var/lib/aegis /run/aegis
+
+[Install]
+WantedBy=multi-user.target

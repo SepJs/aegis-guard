@@ -1,32 +1,167 @@
+//! File-system tripwires: decoy files watched for access / modification.
+//! Uses periodic mtime/size checks (cross-platform, no inotify required).
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::RwLock;
-use anyhow::{Context, Result};
-use chrono::Utc;
-use serde::{Deserialize, Serialize};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tracing::{info, warn};
-use uuid::Uuid;
 
 use crate::models::{DeceptionEvent, TrapKind};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DecoyTrap {
-    pub id: String,
-    pub path: String,
-    pub trap_type: String,
-    pub original_hash: String,
-    pub created_ts: i64,
-    pub last_checked_ts: i64,
-    pub triggered: bool,
-    pub trigger_count: u32,
+const DEFAULT_DECOYS: &[(&str, &str)] = &[
+    (".aws/credentials", "[default]\naws_access_key_id=AKIA_AEGIS_CANARY_FAKE\naws_secret_access_key=wJalrXUtnFEMI/K7MDENG/bPxRfiCYAEGISCANARY\n"),
+    (".ssh/id_rsa_aegis_decoy", "-----BEGIN RSA PRIVATE KEY-----\nAegisGuard-Decoy-Key-Do-Not-Use\n-----END RSA PRIVATE KEY-----\n"),
+    ("wallet.dat.aegis", "AEGIS_DECOY_WALLET_NOT_REAL\n"),
+    (".env.production.aegis", "DB_PASSWORD=aegis_decoy_secret\nAPI_KEY=sk_aegis_fake_key\n"),
+];
+
+#[derive(Clone)]
+struct TrapState {
+    path: PathBuf,
+    mtime: u64,
+    size: u64,
+    label: String,
 }
 
 pub struct TrapManager {
-    traps: RwLock<HashMap<String, DecoyTrap>>,
-    store: PathBuf,
+    traps: Arc<Mutex<HashMap<String, TrapState>>>,
+    events: Arc<Mutex<Vec<DeceptionEvent>>>,
+    running: Arc<Mutex<bool>>,
+    base_dir: PathBuf,
 }
 
-fn get_deception_dir() -> PathBuf {
+impl TrapManager {
+    pub fn new() -> Self {
+        let base = trap_base_dir();
+        let _ = std::fs::create_dir_all(&base);
+        Self {
+            traps: Arc::new(Mutex::new(HashMap::new())),
+            events: Arc::new(Mutex::new(Vec::new())),
+            running: Arc::new(Mutex::new(false)),
+            base_dir: base,
+        }
+    }
+
+    /// Deploy default decoy files and start watching them.
+    pub fn deploy_defaults(&self) -> anyhow::Result<usize> {
+        let mut count = 0;
+        for (rel, content) in DEFAULT_DECOYS {
+            let path = self.base_dir.join(rel);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            if !path.exists() {
+                std::fs::write(&path, content)?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+                }
+                count += 1;
+            }
+            self.watch_file(path.to_string_lossy().as_ref(), rel)?;
+        }
+        info!(count, base = %self.base_dir.display(), "decoy trap files deployed");
+        Ok(count)
+    }
+
+    pub fn watch_file(&self, path: &str, label: &str) -> anyhow::Result<()> {
+        let p = PathBuf::from(path);
+        let (mtime, size) = file_meta(&p);
+        self.traps.lock().unwrap().insert(
+            path.to_string(),
+            TrapState {
+                path: p,
+                mtime,
+                size,
+                label: label.to_string(),
+            },
+        );
+        Ok(())
+    }
+
+    pub fn start_watcher(&self) {
+        let mut flag = self.running.lock().unwrap();
+        if *flag {
+            return;
+        }
+        *flag = true;
+        drop(flag);
+
+        let traps = self.traps.clone();
+        let events = self.events.clone();
+        let running = self.running.clone();
+
+        std::thread::spawn(move || {
+            while *running.lock().unwrap() {
+                std::thread::sleep(Duration::from_secs(3));
+                let snapshot: Vec<(String, TrapState)> = traps
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect();
+
+                for (key, prev) in snapshot {
+                    if !prev.path.exists() {
+                        // File deleted — strong signal
+                        push_event(
+                            &events,
+                            TrapKind::TrapFileModified,
+                            &key,
+                            &format!(
+                                "Trap file '{}' was deleted or moved — possible ransomware/indexing activity.",
+                                prev.label
+                            ),
+                        );
+                        traps.lock().unwrap().remove(&key);
+                        continue;
+                    }
+                    let (mtime, size) = file_meta(&prev.path);
+                    if mtime != prev.mtime || size != prev.size {
+                        warn!(path = %key, "TRAP FILE MODIFIED");
+                        push_event(
+                            &events,
+                            TrapKind::TrapFileModified,
+                            &key,
+                            &format!(
+                                "Trap/decoy file '{}' was modified (size {}→{}, mtime changed). Unauthorized access likely.",
+                                prev.label, prev.size, size
+                            ),
+                        );
+                        if let Some(t) = traps.lock().unwrap().get_mut(&key) {
+                            t.mtime = mtime;
+                            t.size = size;
+                        }
+                    }
+                }
+            }
+        });
+        info!("trap file watcher started");
+    }
+
+    pub fn stop(&self) {
+        *self.running.lock().unwrap() = false;
+    }
+
+    pub fn drain_events(&self) -> Vec<DeceptionEvent> {
+        let mut g = self.events.lock().unwrap();
+        std::mem::take(&mut *g)
+    }
+
+    pub fn list_traps(&self) -> Vec<String> {
+        self.traps.lock().unwrap().keys().cloned().collect()
+    }
+}
+
+impl Default for TrapManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn trap_base_dir() -> PathBuf {
     #[cfg(windows)]
     {
         std::env::var("LOCALAPPDATA")
@@ -35,154 +170,47 @@ fn get_deception_dir() -> PathBuf {
     }
     #[cfg(not(windows))]
     {
+        if let Ok(home) = std::env::var("HOME") {
+            let p = PathBuf::from(home).join(".local/share/aegis/traps");
+            if std::fs::create_dir_all(&p).is_ok() {
+                return p;
+            }
+        }
         PathBuf::from("/var/lib/aegis/traps")
     }
 }
 
-impl TrapManager {
-    pub fn new() -> Result<Self> {
-        let dir = get_deception_dir();
-        std::fs::create_dir_all(&dir)?;
-        let store = dir.join("traps.json");
-
-        let traps = if store.exists() {
-            let raw: Vec<DecoyTrap> = serde_json::from_str(&std::fs::read_to_string(&store)?).unwrap_or_default();
-            raw.into_iter().map(|t| (t.id.clone(), t)).collect()
-        } else {
-            HashMap::new()
-        };
-
-        Ok(Self {
-            traps: RwLock::new(traps),
-            store,
-        })
-    }
-
-    pub fn deploy_decoy_credential(&self, target_path: &str, trap_type: &str) -> Result<DecoyTrap> {
-        let id = Uuid::new_v4().to_string();
-        let path = Path::new(target_path);
-
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
+fn file_meta(path: &Path) -> (u64, u64) {
+    match path.metadata() {
+        Ok(m) => {
+            let mtime = m
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            (mtime, m.len())
         }
-
-        let decoy_content = match trap_type {
-            "aws_credentials" => {
-                format!(
-                    "[default]\naws_access_key_id = AKIA{:016X}\naws_secret_access_key = aegis_trap_{:032x}\n# Protected by Aegis Decoy System\n",
-                    blake3::hash(id.as_bytes()).as_bytes().iter().take(8).fold(0u64, |acc, &b| (acc << 8) | b as u64),
-                    id
-                )
-            }
-            "ssh_private_key" => {
-                format!(
-                    "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAABlwAAAAdzc2gtcn\nAEGIS_DECOY_TRAP_{}==\n-----END OPENSSH PRIVATE KEY-----\n",
-                    id
-                )
-            }
-            "env_secret" => {
-                format!(
-                    "DATABASE_URL=postgres://db_admin:aegis_trap_{}@127.0.0.1:5432/prod_db\nJWT_SECRET=aegis_decoy_sec_{}\nSTRIPE_API_KEY=sk_live_aegis_trap_{}\n",
-                    id, id, id
-                )
-            }
-            _ => format!("# Aegis Honeytoken Decoy File\nTOKEN_ID={}\nCREATED_AT={}\n", id, Utc::now().to_rfc3339()),
-        };
-
-        std::fs::write(target_path, &decoy_content).context("write decoy trap file")?;
-        let hash = blake3::hash(decoy_content.as_bytes()).to_hex().to_string();
-
-        let trap = DecoyTrap {
-            id: id.clone(),
-            path: target_path.to_string(),
-            trap_type: trap_type.to_string(),
-            original_hash: hash,
-            created_ts: Utc::now().timestamp_millis(),
-            last_checked_ts: Utc::now().timestamp_millis(),
-            triggered: false,
-            trigger_count: 0,
-        };
-
-        self.traps.write().unwrap().insert(id, trap.clone());
-        self.persist()?;
-
-        info!(path = %target_path, trap_type = %trap_type, "Decoy trap deployed");
-        Ok(trap)
-    }
-
-    pub fn inspect_all_traps(&self) -> Vec<DeceptionEvent> {
-        let mut alerts = Vec::new();
-        let mut traps = self.traps.write().unwrap();
-        let now = Utc::now().timestamp_millis();
-
-        for trap in traps.values_mut() {
-            trap.last_checked_ts = now;
-            let path = Path::new(&trap.path);
-
-            if !path.exists() {
-                // Trap file deleted!
-                if !trap.triggered {
-                    trap.triggered = true;
-                    trap.trigger_count += 1;
-                    warn!(path = %trap.path, "🚨 DECOY TRAP DELETED: Potential ransomware or wiper activity!");
-                    alerts.push(DeceptionEvent {
-                        id: Uuid::new_v4().to_string(),
-                        kind: TrapKind::TrapFileModified,
-                        target: trap.path.clone(),
-                        trigger_pid: None,
-                        trigger_proc: None,
-                        confidence: "high".to_string(),
-                        reason: format!("Decoy trap file '{}' was deleted by an unauthorized process", trap.path),
-                        ts: now,
-                    });
-                }
-            } else if let Ok(content) = std::fs::read(path) {
-                let current_hash = blake3::hash(&content).to_hex().to_string();
-                if current_hash != trap.original_hash {
-                    // Trap file tampered with or overwritten!
-                    trap.triggered = true;
-                    trap.trigger_count += 1;
-                    warn!(path = %trap.path, "🚨 DECOY TRAP MODIFIED: Tampering or encryption detected!");
-                    alerts.push(DeceptionEvent {
-                        id: Uuid::new_v4().to_string(),
-                        kind: TrapKind::TrapFileModified,
-                        target: trap.path.clone(),
-                        trigger_pid: None,
-                        trigger_proc: None,
-                        confidence: "high".to_string(),
-                        reason: format!("Decoy trap file '{}' was modified/encrypted (hash mismatch)", trap.path),
-                        ts: now,
-                    });
-                }
-            }
-        }
-
-        let _ = self.persist_locked(&traps);
-        alerts
-    }
-
-    pub fn list_traps(&self) -> Vec<DecoyTrap> {
-        self.traps.read().unwrap().values().cloned().collect()
-    }
-
-    fn persist(&self) -> Result<()> {
-        let traps = self.traps.read().unwrap();
-        self.persist_locked(&traps)
-    }
-
-    fn persist_locked(&self, traps: &HashMap<String, DecoyTrap>) -> Result<()> {
-        let list: Vec<&DecoyTrap> = traps.values().collect();
-        let json = serde_json::to_string_pretty(&list)?;
-        std::fs::write(&self.store, json)?;
-        Ok(())
+        Err(_) => (0, 0),
     }
 }
 
-impl Default for TrapManager {
-    fn default() -> Self {
-        Self::new().unwrap_or_else(|_| Self {
-            traps: RwLock::new(HashMap::new()),
-            store: PathBuf::from("traps.json"),
-        })
+fn push_event(events: &Arc<Mutex<Vec<DeceptionEvent>>>, kind: TrapKind, target: &str, reason: &str) {
+    let ev = DeceptionEvent {
+        id: uuid::Uuid::new_v4().to_string(),
+        kind,
+        target: target.to_string(),
+        trigger_pid: None,
+        trigger_proc: None,
+        confidence: "high".into(),
+        reason: reason.to_string(),
+        ts: chrono::Utc::now().timestamp_millis(),
+    };
+    if let Ok(mut g) = events.lock() {
+        g.push(ev);
+        if g.len() > 200 {
+            let drain = g.len() - 200;
+            g.drain(0..drain);
+        }
     }
 }

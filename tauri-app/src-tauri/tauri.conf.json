@@ -1,6 +1,6 @@
 {
   "productName": "Aegis-Guard",
-  "version": "0.1.0",
+  "version": "1.1.0",
   "identifier": "xrg.vladimir.aegis-guard",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -11,7 +11,7 @@
   "app": {
     "windows": [
       {
-        "title": "Aegis-Guard — Vladimir Unknown",
+        "title": "Aegis-Guard \u2014 Endpoint Defense",
         "width": 1280,
         "height": 800,
         "minWidth": 960,
@@ -22,14 +22,73 @@
         "fullscreen": false
       }
     ],
-    "security": { "csp": null }
+    "security": {
+      "csp": null
+    }
   },
   "bundle": {
     "active": true,
-    "targets": "all",
-    "icon": ["icons/icon.png", "icons/icon.ico"],
-    "copyright": "Vladimir Unknown",
-    "longDescription": "Aegis-Guard endpoint security suite by Vladimir Unknown",
-    "linux": { "deb": { "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"] } }
-  }
+    "targets": [
+      "nsis",
+      "msi",
+      "deb",
+      "rpm",
+      "appimage"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      "icons/icon.ico"
+    ],
+    "copyright": "Copyright \u00a9 Vladimir Unknown",
+    "category": "Security",
+    "shortDescription": "Real-time endpoint & network defense",
+    "longDescription": "Aegis-Guard is a native endpoint detection and response suite with process lineage monitoring, Shannon entropy forensics, network attack observation, isolated malware sandbox, and cryptographic audit trails.",
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "",
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installMode": "perMachine",
+        "languages": [
+          "English"
+        ],
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico",
+        "headerImage": null,
+        "sidebarImage": null,
+        "startMenuFolder": "Aegis-Guard",
+        "installerHooks": null
+      },
+      "wix": {
+        "language": "en-US"
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0",
+          "libayatana-appindicator3-1"
+        ],
+        "section": "security",
+        "priority": "optional"
+      },
+      "rpm": {
+        "depends": [
+          "webkit2gtk4.1",
+          "gtk3"
+        ]
+      },
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    }
+  },
+  "plugins": {}
 }

@@ -1,37 +1,48 @@
 [package]
-name        = "aegis-tauri"
-version     = "0.1.0"
+name        = "aegis-guard"
+version     = "1.1.0"
 edition     = "2021"
-description = "Aegis-Guard dashboard — by Vladimir Unknown"
+description = "Aegis-Guard desktop suite — Tauri shell + security engines"
+authors     = ["Vladimir Unknown"]
+license     = "Proprietary"
 
 [lib]
-name       = "aegis_tauri_lib"
+name = "aegis_tauri_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
-[dependencies]
-serde              = { workspace = true }
-serde_json         = { workspace = true }
-tokio              = { workspace = true }
-anyhow             = { workspace = true }
-tracing            = { workspace = true }
-tracing-subscriber = { workspace = true }
-uuid               = { workspace = true }
-chrono             = { workspace = true }
-blake3             = { workspace = true }
-
-ipc            = { path = "../../crates/ipc" }
-journal        = { path = "../../crates/journal" }
-entropy        = { path = "../../crates/entropy" }
-updater        = { path = "../../crates/updater" }
-active-defense = { path = "../../crates/active-defense" }
-threat-intel   = { path = "../../crates/threat-intel" }
-behavioral     = { path = "../../crates/behavioral" }
-deception      = { path = "../../crates/deception" }
-self-protect   = { path = "../../crates/self-protect" }
-process-engine = { path = "../../crates/process-engine" }
-ebpf-filter    = { path = "../../crates/ebpf-filter" }
-
-tauri          = { version = "2", features = [] }
+[[bin]]
+name = "Aegis-Guard"
+path = "src/main.rs"
 
 [build-dependencies]
-tauri-build    = { version = "2", features = [] }
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+tokio       = { workspace = true }
+anyhow      = { workspace = true }
+thiserror   = { workspace = true }
+tracing     = { workspace = true }
+tracing-subscriber = { workspace = true }
+chrono      = { workspace = true }
+uuid        = { workspace = true }
+blake3      = { workspace = true }
+
+# Internal engines
+active-defense = { path = "../../crates/active-defense" }
+behavioral     = { path = "../../crates/behavioral" }
+deception      = { path = "../../crates/deception" }
+entropy        = { path = "../../crates/entropy" }
+ipc            = { path = "../../crates/ipc" }
+journal        = { path = "../../crates/journal" }
+process-engine = { path = "../../crates/process-engine" }
+self-protect   = { path = "../../crates/self-protect" }
+threat-intel   = { path = "../../crates/threat-intel" }
+updater        = { path = "../../crates/updater" }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

@@ -14,7 +14,7 @@ fn main() -> anyhow::Result<()> {
     print!("\x1b[2J\x1b[H"); io::stdout().flush().ok();
     println!("{VIOLET}{BOLD}");
     println!("  ╔═══════════════════════════════════════════╗");
-    println!("  ║     AEGIS-GUARD  INSTALLER  v0.1.0       ║");
+    println!("  ║     AEGIS-GUARD  INSTALLER  v1.1.0       ║");
     println!("  ║     by Vladimir Unknown                   ║");
     println!("  ╚═══════════════════════════════════════════╝");
     println!("{RESET}");

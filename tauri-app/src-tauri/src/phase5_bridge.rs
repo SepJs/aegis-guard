@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use behavioral::BehaviorEngine;
 use deception::canary::CanaryManager;
+use deception::{HoneypotManager, TrapManager};
 use journal::models::{Severity, ThreatIncident};
 use self_protect::{IntegrityMonitor, SelfProtectEvent};
 use threat_intel::ThreatMatcher;
@@ -43,6 +44,7 @@ pub async fn start(state: Arc<AppState>, app: AppHandle, data_dir: std::path::Pa
             let _ = app3.emit("self-protect-event", &ev);
             let incident = ThreatIncident {
                 id: Uuid::new_v4().to_string(), kind: "self_protection".into(), severity: Severity::High,
+                risk_score: 72.0,
                 pid: std::process::id(), ppid: 0, process: "aegis-process-engine".into(),
                 cmdline: vec![], exe_path: None, rule: format!("{:?}", ev.kind),
                 confidence: ev.confidence.clone(), reason: ev.reason.clone(), ancestors: vec![],
@@ -57,6 +59,88 @@ pub async fn start(state: Arc<AppState>, app: AppHandle, data_dir: std::path::Pa
     match CanaryManager::new() {
         Ok(canary) => info!("canary manager ready ({} tokens)", canary.list().len()),
         Err(e) => warn!("canary manager init failed: {}", e),
+    }
+
+    // Deploy filesystem traps + start honeypot listeners (loopback only)
+    {
+        let app_t = app.clone();
+        let st_t = state.clone();
+        tokio::task::spawn_blocking(move || {
+            let traps = TrapManager::new();
+            match traps.deploy_defaults() {
+                Ok(n) => info!("deception traps deployed ({n} new decoys)"),
+                Err(e) => warn!("trap deploy failed: {e}"),
+            }
+            traps.start_watcher();
+            loop {
+                std::thread::sleep(Duration::from_secs(5));
+                for ev in traps.drain_events() {
+                    let _ = app_t.emit("deception-event", &ev);
+                    let incident = ThreatIncident {
+                        id: Uuid::new_v4().to_string(),
+                        kind: "deception_trap".into(),
+                        severity: Severity::High,
+                        risk_score: 80.0,
+                        pid: ev.trigger_pid.unwrap_or(0),
+                        ppid: 0,
+                        process: ev.trigger_proc.clone().unwrap_or_else(|| "unknown".into()),
+                        cmdline: vec![],
+                        exe_path: None,
+                        rule: format!("{:?}", ev.kind),
+                        confidence: ev.confidence.clone(),
+                        reason: ev.reason.clone(),
+                        ancestors: vec![],
+                        ts: Utc.timestamp_millis_opt(ev.ts).unwrap(),
+                        resolved: false,
+                        digest: String::new(),
+                    };
+                    if let Ok(j) = st_t.journal.lock() {
+                        if let Ok(saved) = j.insert_incident(incident) {
+                            let _ = app_t.emit("anomaly", &saved);
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    {
+        let app_h = app.clone();
+        let st_h = state.clone();
+        tokio::task::spawn_blocking(move || {
+            let hp = HoneypotManager::new();
+            hp.start();
+            info!("honeypot listeners armed (loopback decoy ports)");
+            loop {
+                std::thread::sleep(Duration::from_secs(5));
+                for ev in hp.drain_events() {
+                    let _ = app_h.emit("deception-event", &ev);
+                    let incident = ThreatIncident {
+                        id: Uuid::new_v4().to_string(),
+                        kind: "honeypot".into(),
+                        severity: Severity::High,
+                        risk_score: 85.0,
+                        pid: 0,
+                        ppid: 0,
+                        process: "honeypot".into(),
+                        cmdline: vec![],
+                        exe_path: None,
+                        rule: format!("{:?}", ev.kind),
+                        confidence: ev.confidence.clone(),
+                        reason: ev.reason.clone(),
+                        ancestors: vec![],
+                        ts: Utc.timestamp_millis_opt(ev.ts).unwrap(),
+                        resolved: false,
+                        digest: String::new(),
+                    };
+                    if let Ok(j) = st_h.journal.lock() {
+                        if let Ok(saved) = j.insert_incident(incident) {
+                            let _ = app_h.emit("anomaly", &saved);
+                        }
+                    }
+                }
+            }
+        });
     }
 
     info!("Phase 5 modules started");
@@ -74,6 +158,7 @@ async fn behavioral_scan_loop(engine: Arc<BehaviorEngine>, state: Arc<AppState>,
                 let incident = ThreatIncident {
                     id: Uuid::new_v4().to_string(), kind: "behavioral_deviation".into(),
                     severity: if anomaly.anomaly_score > 70.0 { Severity::High } else { Severity::Medium },
+                    risk_score: anomaly.anomaly_score,
                     pid: anomaly.pid, ppid: 0, process: anomaly.name.clone(), cmdline: vec![], exe_path: None,
                     rule: "BEH-001".into(), confidence: anomaly.confidence.clone(), reason: anomaly.reason.clone(),
                     ancestors: vec![], ts: Utc.timestamp_millis_opt(anomaly.ts).unwrap(), resolved: false, digest: String::new(),
@@ -90,10 +175,6 @@ async fn behavioral_scan_loop(engine: Arc<BehaviorEngine>, state: Arc<AppState>,
 }
 
 fn collect_all_pids() -> anyhow::Result<Vec<u32>> {
-    let mut pids = Vec::new();
-    for entry in std::fs::read_dir("/proc")? {
-        let entry = entry?;
-        if let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() { pids.push(pid); }
-    }
-    Ok(pids)
+    let map = process_engine::snapshot_all().unwrap_or_default();
+    Ok(map.keys().copied().collect())
 }

@@ -1,4 +1,4 @@
-# Aegis-Guard Makefile — by Vladimir Unknown
+# Aegis-Guard Makefile
 
 .PHONY: run build release check fix install clean
 
@@ -25,7 +25,7 @@ fix:
 install: release
 	mkdir -p target
 	cd network-observer && go build -o ../target/aegis-network-observer ./cmd/observer
-	sudo bash installers/linux/install-linux.sh
+	sudo bash installers/setup-systemd.sh
 	sudo install -m 755 target/release/aegis-process-engine /usr/local/bin/
 	sudo install -m 755 target/aegis-network-observer /usr/local/bin/
 

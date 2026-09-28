@@ -57,6 +57,7 @@ fn handle_event(event: ProcEvent, state: &Arc<AppState>, app: &AppHandle) {
 
         let incident = ThreatIncident {
             id: Uuid::new_v4().to_string(), kind: kind.into(), severity,
+            risk_score: match anomaly.confidence.as_str() { "high" => 85.0, "medium" => 55.0, _ => 25.0 },
             pid: event.pid, ppid: event.ppid, process: event.name.clone(),
             cmdline: event.cmdline.clone(), exe_path: event.exe.clone(),
             rule: anomaly.rule.clone(), confidence: anomaly.confidence.clone(), reason: anomaly.reason.clone(),

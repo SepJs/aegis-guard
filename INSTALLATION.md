@@ -1,124 +1,197 @@
-# Aegis-Guard Cross-Platform Deployment & Native Installation Guide
+# Aegis-Guard — Installation Guide
 
-Aegis-Guard is an endpoint and network security defense suite engineered in **Rust, Go, and React/TypeScript (Tauri v2)**.
-It runs as a native system daemon with root/administrator capabilities, in-kernel eBPF socket filters, and a hardware-accelerated desktop UI.
+Native endpoint & network defense. Two independent install tracks:
 
-### ⚡ Architecture: Direct In-Memory Native Runtime (Zero Localhost Web Server)
-- **No Localhost Dependency:** Unlike web wrappers, the frontend assets are compiled and embedded directly inside the native binary (`tauri-app/dist` -> Rust executable).
-- **Direct IPC / Memory Pointers:** IPC between the UI and security engines occurs via direct in-process pipes and native OS bindings, requiring **zero open localhost ports** and eliminating port hijacking vectors.
-- **Embedded Webview:** Renders natively via Microsoft Edge WebView2 on Windows and WebKitGTK on Linux.
+| Platform | Standard package | Install style |
+|----------|------------------|---------------|
+| **Windows** | NSIS `.exe` installer (and optional `.msi`) | Program Files + Start Menu + Uninstaller + optional Windows Service |
+| **Linux** | `.deb` / `.rpm` / `.AppImage` | Package manager or portable AppImage + desktop entry |
 
----
-
-## Folder Structure Overview
-
-```text
-aegis-guard/
-├── crates/                    # High-performance Rust security engines
-│   ├── process-engine/        # Process lineage & memory anomaly watcher
-│   ├── ebpf-filter/           # In-kernel eBPF socket filter (SO_ATTACH_BPF)
-│   ├── behavioral/            # Multi-stage killchain & risk scoring
-│   ├── active-defense/        # Mitigation, process isolation & quarantine
-│   ├── threat-intel/          # Real-time IOC feeds & local bloom filter
-│   ├── deception/             # Honeypot decoy canaries & tripwires
-│   ├── entropy/               # Shannon entropy payload scanner
-│   ├── journal/               # Cryptographic tamper-proof audit journal
-│   ├── updater/               # In-place binary signature verification
-│   └── installer/             # Rust native interactive installer CLI
-├── network-observer/          # Go high-throughput network IDS & packet sniffer
-├── tauri-app/                 # Desktop UI (React 18, TypeScript, Tailwind CSS, Recharts)
-├── installers/                # Dedicated platform deployment suites
-│   ├── windows/               # Windows deployment suites
-│   │   ├── aegis-setup.iss    # Official Inno Setup 6 Wizard script (Industry Standard)
-│   │   ├── AegisGuard.nsi     # Nullsoft Scriptable Install System (NSIS) script
-│   │   ├── install-windows.ps1# PowerShell automated installer with service setup
-│   │   └── install-windows.bat# Double-click UAC auto-elevating batch installer
-│   └── linux/                 # Linux deployment suites
-│       ├── install-linux.sh   # High-quality interactive console/CLI installer
-│       ├── auto-install.sh    # Non-interactive 1-liner auto installer
-│       └── uninstall-linux.sh # Complete uninstaller script
-├── resources/                 # Icons, YARA rules, signatures, decoy templates
-└── 1-CLICK-INSTALL-WINDOWS.bat# Convenience root launcher for Windows
-```
+One GitHub repository. One Release tag. **Separate download assets** per OS — users never mix them.
 
 ---
 
-## 1. Linux Installation (Debian, Ubuntu, Fedora, Arch, RHEL, openSUSE)
+## 1. Recommended: download from GitHub Releases
 
-Linux systems require `root` or `sudo` to attach kernel eBPF probes, inspect unprivileged `/proc` file descriptors, and manipulate packet filters.
+After a version tag is pushed (`v1.1.0`, etc.), CI builds both platforms and attaches:
 
-### Interactive Console / CLI Installer:
-Run the high-quality interactive terminal installer:
-```bash
-sudo bash installers/linux/install-linux.sh
+```
+Aegis-Guard_1.1.0_x64-setup.exe     ← Windows (double-click)
+Aegis-Guard_1.1.0_x64_en-US.msi     ← Windows (enterprise / silent)
+Aegis-Guard_1.1.0_amd64.deb         ← Debian / Ubuntu / Mint
+Aegis-Guard_1.1.0_x86_64.rpm        ← Fedora / RHEL / openSUSE
+Aegis-Guard_1.1.0_amd64.AppImage    ← any modern Linux (portable)
 ```
 
-**Features of the Linux Console Installer:**
-- **Terminal UI (TUI):** Aesthetic Unicode box-drawing banners, color-coded status pills, and progress indicators.
-- **Hardware & Distro Auto-Detection:** Automatically detects architecture (`x86_64`, `aarch64`, `armv7l`) and package manager (`apt`, `dnf`, `pacman`, `zypper`, `apk`).
-- **Interactive Profiles:**
-  1. Full Production Suite (EDR Daemon + eBPF Observer + Desktop GUI App)
-  2. Headless Server Agent (Background daemons and systemd services only)
-  3. Development Mode (Live compile & hot-reload)
-  4. Complete Uninstaller
-- **Systemd Daemon Integration:**
-  - Installs and enables `aegis-guard.service` and `aegis-observer.service` with `Restart=always`.
-- **Zero-Leak Vault Provisioning:**
-  - Configures `/var/lib/aegis-guard/quarantine` and `sandbox` with strict `0700` permissions.
-- **Desktop Application Integration:**
-  - Installs `/usr/share/applications/aegis-guard.desktop` and application launcher icon.
+### Windows (standard user experience)
 
-### Non-Interactive 1-Liner (Automated Script):
-```bash
-curl -fsSL https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/linux/auto-install.sh | sudo bash
-```
+1. Download `*-setup.exe`.
+2. Double-click → accept UAC.
+3. Follow the wizard (install path defaults to `C:\Program Files\Aegis-Guard`).
+4. Finish → Start Menu entry + Desktop shortcut created.
+5. Optional: Windows Service for always-on engines (toggle in installer / Settings).
 
-### Uninstallation on Linux:
-```bash
-sudo aegis-uninstall
-# or:
-sudo bash installers/linux/uninstall-linux.sh
-```
+Uninstall: **Settings → Apps → Aegis-Guard → Uninstall** (or Control Panel). Clean removal of binaries, Start Menu, and (optionally) `ProgramData` logs.
 
----
+Silent / enterprise:
 
-## 2. Windows Installation (Windows 10, 11, Windows Server)
-
-Windows installations require Administrator rights to interact with the Service Control Manager (`sc.exe`), configure Windows Defender Firewall, and secure quarantine directories.
-
-### Method A — Standard Inno Setup Installer (`.iss`):
-Inno Setup is the official open-source Windows installer technology used by Microsoft VS Code, Git for Windows, and Notepad++.
-To compile the installer executable:
-```cmd
-iscc installers\windows\aegis-setup.iss
-```
-This produces a certified Windows setup wizard: `AegisGuard-Setup-x64.exe` with:
-- Standard Windows wizard pages (License, Destination folder, Desktop icon, Service configuration).
-- Automatic stop of running instances before update.
-- Windows Defender Firewall rules for the Go network observer.
-- Background service registration (`AegisProcessEngine`).
-- Clean uninstallation via Windows "Add or Remove Programs" (Control Panel).
-
-### Method B — Nullsoft Scriptable Install System (`.nsi`):
-Compile with NSIS:
-```cmd
-makensis installers\windows\AegisGuard.nsi
-```
-Generates `AegisGuard-Setup-NSIS-x64.exe`.
-
-### Method C — Automated 1-Click PowerShell / Batch Install:
-1. Double-click `1-CLICK-INSTALL-WINDOWS.bat` from the root directory or run:
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/windows/install-windows.ps1 | iex"
+# NSIS silent
+.\Aegis-Guard_1.1.0_x64-setup.exe /S
+
+# MSI silent
+msiexec /i Aegis-Guard_1.1.0_x64_en-US.msi /qn
 ```
-2. Accept the Windows UAC Administrator prompt.
-The script automatically builds release binaries, registers Windows Services, creates Start Menu & Desktop shortcuts, and launches the application.
+
+### Linux (standard package experience)
+
+**Debian / Ubuntu / derivatives**
+
+```bash
+sudo dpkg -i Aegis-Guard_*.deb
+# if deps missing:
+sudo apt-get install -f
+```
+
+**Fedora / RHEL / openSUSE**
+
+```bash
+sudo rpm -i Aegis-Guard_*.rpm
+# or
+sudo dnf install ./Aegis-Guard_*.rpm
+```
+
+**Portable (no root)**
+
+```bash
+chmod +x Aegis-Guard_*.AppImage
+./Aegis-Guard_*.AppImage
+```
+
+Desktop entry and optional systemd user/system units are registered by the `.deb`/`.rpm` post-install scripts when present.
+
+Uninstall:
+
+```bash
+# Debian family
+sudo apt remove aegis-guard
+
+# RPM family
+sudo dnf remove aegis-guard
+```
 
 ---
 
-## 3. Verification & Diagnostics
+## 2. How GitHub Releases keep Linux and Windows separate
 
-After installation, verify that all security subsystems are operating at 100% integrity:
-- **GUI:** Navigate to `Settings` -> Click **`⚡ RUN FULL ENGINE SELF-TEST`** (evaluates all 11 security engines).
-- **Linux CLI:** `systemctl status aegis-guard.service aegis-observer.service`
-- **Windows CLI:** `sc.exe query AegisProcessEngine`
+You do **not** need two repositories.
+
+Best practice (what this project uses):
+
+1. **Single repo**, single version tag: `v1.1.0`
+2. **GitHub Actions matrix** builds:
+   - `ubuntu-22.04` → `.deb` / `.rpm` / `.AppImage` + Linux binaries
+   - `windows-latest` → NSIS `.exe` + `.msi` + Windows binaries
+3. **One Release page** lists all assets with clear names.
+4. Users download only the file for their OS.
+
+Optional extras (not required):
+
+- Release body table (already generated by the workflow) explaining which file to pick.
+- If you ever want completely different codebases: use two repos or a monorepo with path filters — usually unnecessary and harder to maintain.
+
+---
+
+## 3. Developer / source install
+
+### Linux (from clone)
+
+```bash
+git clone https://github.com/SepJs/aegis-guard.git
+cd aegis-guard
+bash installers/install-linux.sh
+# or one-shot:
+bash aegis.sh
+```
+
+The Linux installer detects distro, installs build deps, builds engines + UI, places binaries under `/usr/local/bin` (or `$HOME/.local`), installs a desktop launcher, and optionally systemd units.
+
+### Windows (from clone)
+
+```powershell
+# Run PowerShell as Administrator
+Set-ExecutionPolicy -Scope Process Bypass
+.\installers\install-windows.ps1
+```
+
+Or the batch launcher:
+
+```cmd
+installers\1-CLICK-INSTALL-WINDOWS.bat
+```
+
+This path builds from source, deploys to `Program Files\Aegis-Guard`, provisions `ProgramData`, firewall rules, and optional service. For end-users prefer the prebuilt NSIS `.exe` from Releases.
+
+### Produce installers locally
+
+```bash
+# Prerequisites: Rust, Node 20+, (Linux: webkitgtk) (Windows: WebView2)
+cd tauri-app
+npm ci
+cargo tauri build
+```
+
+Artifacts appear under:
+
+```
+tauri-app/src-tauri/target/release/bundle/
+  nsis/     → Windows setup.exe
+  msi/      → Windows MSI
+  deb/      → Linux .deb
+  rpm/      → Linux .rpm
+  appimage/ → Linux AppImage
+```
+
+---
+
+## 4. What gets installed where
+
+### Windows
+
+| Path | Purpose |
+|------|---------|
+| `C:\Program Files\Aegis-Guard\` | Application + engines |
+| `C:\ProgramData\Aegis-Guard\` | Logs, journal DB, quarantine, sandbox, canaries |
+| Start Menu / Desktop | Shortcuts |
+| Services (optional) | `AegisGuardService` auto-start |
+
+### Linux
+
+| Path | Purpose |
+|------|---------|
+| `/usr/bin` or `/usr/local/bin` | `aegis-guard`, process-engine, network-observer |
+| `/var/lib/aegis/` or `~/.local/share/aegis/` | Journal, quarantine, sandbox |
+| `/usr/share/applications/` | Desktop entry |
+| systemd (optional) | `aegis-process-engine.service`, `aegis-network-observer.service` |
+
+---
+
+## 5. Requirements
+
+| | Windows | Linux |
+|--|---------|-------|
+| OS | Windows 10 1809+ / 11 | Modern glibc distro (Ubuntu 22.04+, Fedora 38+, …) |
+| Runtime | WebView2 (bootstrapper in installer) | WebKitGTK 4.1, GTK 3 |
+| Privileges | Admin for service / Program Files | root for system-wide package; AppImage runs as user |
+| Optional | Npcap (advanced packet capture) | libpcap / capabilities for raw sockets |
+
+---
+
+## 6. Troubleshooting
+
+- **Windows: blank window** → install/repair WebView2 Evergreen.
+- **Linux: missing shared libs** → install `libwebkit2gtk-4.1-0` / distro equivalent.
+- **Network observer needs privileges** → run with capabilities or as root/admin for full IDS features.
+- **Sandbox isolation limited** → full Linux namespaces need appropriate privileges; falls back to directory jail automatically.
+
+For architecture and feature details see [README.md](./README.md).

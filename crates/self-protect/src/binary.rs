@@ -15,7 +15,12 @@ pub fn hash_file(path: &std::path::Path) -> Result<String> {
     Ok(blake3::hash(&data).to_hex().to_string())
 }
 
-pub fn own_binary_path() -> Result<PathBuf> { Ok(std::fs::read_link("/proc/self/exe")?) }
+pub fn own_binary_path() -> Result<PathBuf> {
+    #[cfg(unix)]
+    { Ok(std::fs::read_link("/proc/self/exe").or_else(|_| std::env::current_exe())?) }
+    #[cfg(not(unix))]
+    { Ok(std::env::current_exe()?) }
+}
 
 pub async fn start_binary_monitor(tx: mpsc::Sender<SelfProtectEvent>) {
     let path = match own_binary_path() { Ok(p) => p, Err(e) => { warn!("binary integrity: cannot resolve own path: {}", e); return; } };

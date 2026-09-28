@@ -1,7 +1,7 @@
 # Aegis-Guard — Native Endpoint Security & Intrusion Detection Suite
 
-[![App Version](https://img.shields.io/badge/App_Version-1.0.0-0d9488?style=flat-square)](https://github.com/SepJs/aegis-guard)
-[![Engine Version](https://img.shields.io/badge/Core_Engine-v4.5_%7C_Hotpatch_v4.5.1-6366f1?style=flat-square)](https://github.com/SepJs/aegis-guard)
+[![App Version](https://img.shields.io/badge/App_Version-1.1.0-0d9488?style=flat-square)](https://github.com/SepJs/aegis-guard)
+[![Engine Version](https://img.shields.io/badge/Core_Engine-v4.6.0-6366f1?style=flat-square)](https://github.com/SepJs/aegis-guard)
 [![License](https://img.shields.io/badge/License-MIT_or_Apache_2.0-blue?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Linux_%7C_Windows-orange?style=flat-square)](https://github.com/SepJs/aegis-guard)
 
@@ -78,27 +78,27 @@ Aegis-Guard operates with zero mock dependencies:
 - Deploys deceptive decoy files (`.aws/credentials`, `wallet.dat`, `id_rsa`) to detect unauthorized directory traversal or ransomware indexing before production files are touched.
 
 ### 6. 🔄 Live Engine Hotpatching & Auto-Update
-- **Zero-Downtime Signature Engine**: Live-updates the core threat detection rules from **v4.5** to **v4.5.1-HOTPATCH** with a single click or automatically in the background.
+- **Zero-Downtime Signature Engine**: Live-updates the core threat detection rules (current **v4.6.0**) with a single click or automatically in the background.
 - Logs hotpatch applications directly into the BLAKE3 audit ledger.
 
 ---
 
 ## Installation Guide
 
-### Option A: Linux Automated & Interactive Install (Recommended)
+### Option A: Linux Automated 1-Click Install (Recommended)
 
 Run the automated installer script:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/linux/auto-install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/auto-install.sh | sudo bash
 ```
 
-Or from a local clone using the interactive terminal installer:
+Or from a local clone:
 
 ```bash
 git clone https://github.com/SepJs/aegis-guard.git
 cd aegis-guard
-sudo bash installers/linux/install-linux.sh
+sudo bash installers/install-linux.sh
 ```
 
 **What the Linux installer does:**
@@ -112,7 +112,7 @@ sudo bash installers/linux/install-linux.sh
 
 To uninstall:
 ```bash
-sudo bash installers/linux/uninstall-linux.sh
+sudo bash installers/uninstall-linux.sh
 ```
 
 ---
@@ -122,16 +122,12 @@ sudo bash installers/linux/uninstall-linux.sh
 Open an **Elevated PowerShell** (Run as Administrator):
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/windows/install-windows.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/install-windows.ps1 | iex"
 ```
 
 Or run the 1-click batch file:
-1. Double-click `1-CLICK-INSTALL-WINDOWS.bat` (or `installers\windows\install-windows.bat`)
-2. Allow UAC Administrator prompt when prompted.
-
-**Windows Inno Setup & NSIS Compilers:**
-- Inno Setup 6 Script: `installers/windows/aegis-setup.iss`
-- NSIS Script: `installers/windows/AegisGuard.nsi`
+1. Right-click `installers\1-CLICK-INSTALL-WINDOWS.bat`
+2. Select **"Run as administrator"**
 
 **What the Windows installer does:**
 1. Requests UAC administrative elevation.
@@ -170,60 +166,44 @@ bash aegis.sh
 
 ```
 aegis-guard/
-├── aegis.sh                    # One-command developer launcher
-├── Cargo.toml                  # Root Rust workspace manifest
-├── Makefile                    # Build & lint automation tasks
-├── package.json                # Root npm scripts & dependencies
-├── README.md                   # Complete architectural & deployment documentation
-├── INSTALLATION.md             # Detailed installation instructions
-├── metadata.json               # Application metadata configuration
+├── README.md
+├── INSTALLATION.md
+├── Cargo.toml                 # Rust workspace
+├── Makefile
+├── package.json               # Root npm scripts
+├── aegis.sh                   # Dev one-shot launcher
 │
-├── crates/                     # Modular Rust backend crates
-│   ├── active-defense/         # Process kill, quarantine vault, BLAKE3 audit trail
-│   ├── behavioral/             # Process metrics baseline & Z-score anomaly detection
-│   ├── deception/              # Canary honeypots & tripwire file monitoring
-│   ├── entropy/                # Shannon entropy calculation & byte histogram analysis
-│   ├── ipc/                    # Cross-platform IPC socket protocols (Protobuf / JSON)
-│   ├── journal/                # SQLite persistent threat incident journal
-│   ├── process-engine/         # Linux procfs process lineage & memory inspector
-│   ├── self-protect/           # Anti-debugging, ptrace lock, binary tampering protection
-│   ├── threat-intel/           # CTI feeds & IOC matching (IPs, domains, hashes)
-│   └── updater/                # Semver update checker & GitHub release integration
+├── crates/                    # Rust security engines
+│   ├── process-engine/        # Process lineage & rules
+│   ├── active-defense/        # Kill / quarantine / audit
+│   ├── behavioral/            # Baseline & anomaly scores
+│   ├── deception/             # Canaries, traps, honeypots
+│   ├── entropy/               # Shannon forensics + signatures
+│   ├── threat-intel/          # IOC feeds & matcher
+│   ├── journal/               # SQLite incident store
+│   ├── ipc/                   # Local IPC protocol
+│   ├── self-protect/          # Anti-tamper
+│   └── updater/               # GitHub release checker
 │
-├── network-observer/           # High-speed Go network monitor
-│   ├── cmd/observer/           # Main Go daemon entry point
-│   ├── internal/netmon/        # Raw socket listener & packet parser
-│   └── internal/rules/         # Network attack signatures (SYN flood, DNS tunnel, etc.)
+├── network-observer/          # Go network IDS daemon
+├── tauri-app/                 # React UI + Tauri desktop shell
 │
-├── tauri-app/                  # Desktop application & user interface
-│   ├── src/                    # React 18 + TypeScript user interface
-│   │   ├── components/         # Modular security panels & dashboards
-│   │   │   ├── ForensicsPanel.tsx      # Shannon entropy & User Safeguard triage
-│   │   │   ├── NetworkObserverPanel.tsx# IDS attack monitor & IP null-routing
-│   │   │   ├── ProcessList.tsx         # Real-time process lineage tree
-│   │   │   ├── SandboxPanel.tsx        # Isolated sandbox container inspector
-│   │   │   ├── AuditLogPanel.tsx       # Cryptographic BLAKE3 audit chain verifier
-│   │   │   ├── CanaryPanel.tsx         # Canary honeypots & breach detection
-│   │   │   ├── ThreatIntelPanel.tsx    # IOC threat lookup & intelligence
-│   │   │   └── UpdateBanner.tsx        # Live engine hotpatch & update controller
-│   │   ├── lib/
-│   │   │   ├── engine/securityEngine.ts# Core heuristic security engine & mathematical models
-│   │   │   └── ipc/core.ts             # IPC bridge supporting native & sandboxed runtimes
-│   │   ├── types/                      # Shared TypeScript data models & interfaces
-│   │   ├── App.tsx                     # Main application layout & route controller
-│   │   └── styles.css                  # High-contrast dark security workstation theme
-│   ├── src-tauri/              # Tauri v2 native Rust desktop wrapper
-│   │   ├── src/commands.rs     # Tauri command handlers
-│   │   ├── src/lib.rs          # Service bridge & IPC lifecycle manager
-│   │   └── tauri.conf.json     # Tauri configuration
-│   └── vite.config.ts          # Vite build configuration
+├── installers/                # All install / uninstall scripts
+│   ├── install-linux.sh
+│   ├── uninstall-linux.sh
+│   ├── auto-install.sh
+│   ├── setup-systemd.sh
+│   ├── install-windows.ps1
+│   ├── install-windows.bat
+│   ├── 1-CLICK-INSTALL-WINDOWS.bat
+│   └── install-desktop-launcher.sh
 │
-└── installers/                 # Production deployment scripts
-    ├── 1-CLICK-INSTALL-WINDOWS.bat  # Windows 1-click batch installer
-    ├── auto-install.sh              # Universal curl-to-bash Linux installer
-    ├── install-linux.sh             # Full Linux systemd service installer
-    ├── install-windows.ps1          # Windows elevated PowerShell installer
-    └── uninstall-linux.sh           # Clean uninstallation script
+├── installer/                 # Optional Rust TUI installer crate
+├── resources/
+│   ├── desktop/               # .desktop entries
+│   └── systemd/               # systemd unit templates
+├── proto/                     # Shared protobuf definitions
+└── .github/workflows/         # CI + multi-platform release
 ```
 
 ---

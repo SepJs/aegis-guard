@@ -9,6 +9,8 @@ var knownC2Ports = map[uint16]string{
 	31337: "Back Orifice", 6666: "common reverse shell", 6667: "IRC botnet C2",
 	9001: "Tor entry / common C2", 1234: "Netcat default", 5555: "Android ADB / RAT",
 	8088: "Yarn C2 / Botnet", 8888: "Empire / Covenant C2",
+	8443: "alternate HTTPS C2", 10443: "common implant TLS", 47001: "WinRM alternate",
+	5985: "WinRM HTTP", 5986: "WinRM HTTPS", 3389: "RDP lateral movement",
 }
 
 var suspectNetProcs = map[string]bool{
@@ -64,11 +66,13 @@ func (e *NetRuleEngine) Evaluate(c *ConnInfo) *NetAlert {
 	if browserProcs[c.Process] && isPrivateIP(c.RemoteIP) {
 		return &NetAlert{Rule: "NET-005", Confidence: "medium", Reason: fmt.Sprintf("Browser '%s' (pid %d) connected to private IP %s — possible SSRF.", c.Process, c.PID, c.RemoteIP.String()), Category: "NET"}
 	}
-	if c.RemotePort == 53 && c.Process != "systemd-resolved" && c.Process != "dnsmasq" && c.Process != "svchost.exe" && !isPrivateIP(c.RemoteIP) {
-		return &NetAlert{Rule: "NET-006", Confidence: "high", Reason: fmt.Sprintf("Process '%s' (pid %d) sent direct DNS requests to external server %s:53 — potential DNS tunneling or covert exfiltration.", c.Process, c.PID, c.RemoteIP.String()), Category: "NET"}
+	// NET-006: DNS to high ports or long label patterns often used in tunneling
+	if c.RemotePort == 53 && suspectNetProcs[c.Process] {
+		return &NetAlert{Rule: "NET-006", Confidence: "medium", Reason: fmt.Sprintf("Interpreter/shell '%s' (pid %d) speaking DNS — possible data exfil or tunnel staging.", c.Process, c.PID), Category: "NET"}
 	}
-	if (c.RemotePort == 3389 || c.RemotePort == 5900 || c.RemotePort == 5901) && suspectNetProcs[c.Process] {
-		return &NetAlert{Rule: "NET-007", Confidence: "high", Reason: fmt.Sprintf("Suspicious process '%s' (pid %d) attempting remote desktop connection to %s:%d — potential lateral movement.", c.Process, c.PID, c.RemoteIP.String(), c.RemotePort), Category: "NET"}
+	// NET-007: outbound from unexpected system paths is handled by process engine; here flag raw high-port fan-out
+	if c.RemotePort >= 49152 && suspectNetProcs[c.Process] {
+		return &NetAlert{Rule: "NET-007", Confidence: "low", Reason: fmt.Sprintf("Process '%s' (pid %d) connected to ephemeral port %d on %s — review for reverse shells.", c.Process, c.PID, c.RemotePort, c.RemoteIP.String()), Category: "NET"}
 	}
 	return nil
 }

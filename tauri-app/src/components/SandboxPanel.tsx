@@ -45,10 +45,10 @@ export default function SandboxPanel() {
     setSpawning(true);
     try {
       const res = await invoke<SandboxAnalysisReport>("launch_sandbox_jail", {
-        sample_name: sampleName,
+        sampleName,
         family: sampleFamily,
-        isolation_type: isolationType,
-        network_confinement: networkConfinement,
+        isolationType,
+        networkConfinement,
       });
       if (res) {
         setNotice(`◈ Sandbox Jail ${res.jail_id} spawned successfully. Complete behavioral blueprint synthesized.`);
@@ -64,7 +64,7 @@ export default function SandboxPanel() {
 
   async function handleTerminateJail(jailId: string) {
     try {
-      await invoke("terminate_sandbox_jail", { jail_id: jailId });
+      await invoke("terminate_sandbox_jail", { jailId });
       setNotice(`◈ Sandbox Jail ${jailId} purged & wiped from system.`);
       loadReports();
     } catch (err) {
@@ -183,14 +183,9 @@ export default function SandboxPanel() {
             CONTAINED SAMPLE JAILS ({reports.length})
           </div>
 
-          {reports.length === 0 ? (
-            <div style={{ padding: "20px 14px", color: "var(--tx2)", fontSize: 11, textAlign: "center" }}>
-              No contained jails active. Enter a binary or script path above to launch a sandbox jail.
-            </div>
-          ) : (
-            reports.map((r) => {
-              const isSelected = r.jail_id === selectedJailId;
-              return (
+          {reports.map((r) => {
+            const isSelected = r.jail_id === selectedJailId;
+            return (
               <div
                 key={r.jail_id}
                 onClick={() => setSelectedJailId(r.jail_id)}
@@ -234,8 +229,7 @@ export default function SandboxPanel() {
                 </div>
               </div>
             );
-          })
-        )}
+          })}
         </div>
 
         {/* Right Area: Deep Behavioral Analysis & Blueprint */}

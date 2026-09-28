@@ -88,6 +88,18 @@ impl AuditLog {
     fn last_digest(&self) -> Option<String> {
         self.conn().query_row("SELECT digest FROM audit_log ORDER BY ts_before DESC LIMIT 1", [], |row| row.get(0)).ok()
     }
+
+    pub fn append(&self, pid: u32, action: &str, process: &str, note: &str, status: &str) -> Result<String> {
+        let id = Uuid::new_v4().to_string();
+        let ts = Utc::now().timestamp_millis();
+        let prev = self.last_digest().unwrap_or_default();
+        let digest = compute_chain_digest(&prev, &id, action, pid, ts);
+        self.conn().execute(
+            "INSERT INTO audit_log (id, action, pid, process, incident_id, note, status, outcome, ts_before, ts_after, prev_digest, digest) VALUES (?1,?2,?3,?4,NULL,?5,?6,?6,?7,?7,?8,?9)",
+            params![id, action, pid, process, note, status, ts, prev, digest],
+        ).context("insert audit append")?;
+        Ok(id)
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

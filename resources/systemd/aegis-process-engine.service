@@ -1,0 +1,20 @@
+[Unit]
+Description=Aegis-Guard Process Engine
+Documentation=https://github.com/SepJs/aegis-guard
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/aegis-process-engine
+Restart=on-failure
+RestartSec=3
+# Prefer least privilege; elevate only if needed for /proc inspection
+NoNewPrivileges=false
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/aegis /run/aegis
+RuntimeDirectory=aegis
+StateDirectory=aegis
+
+[Install]
+WantedBy=multi-user.target

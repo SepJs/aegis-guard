@@ -32,6 +32,7 @@ async fn socket_journal_monitor(tx: mpsc::Sender<SelfProtectEvent>) {
 
     loop {
         interval.tick().await;
+        #[cfg(unix)]
         if let Ok(meta) = std::fs::metadata(SOCKET_PATH) {
             use std::os::unix::fs::FileTypeExt;
             if !meta.file_type().is_socket() {

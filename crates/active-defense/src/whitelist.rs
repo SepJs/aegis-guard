@@ -29,9 +29,28 @@ impl WhitelistStore {
     }
 
     pub fn add(&self, pid: u32, process_name: String, exe_path: Option<String>) -> Result<()> {
-        let entry = WhitelistEntry { pid, process_name, exe_path, added_at: Utc::now().timestamp_millis(), note: String::new() };
-        { let mut entries = self.entries.lock().unwrap(); if !entries.iter().any(|e| e.pid == pid) { entries.push(entry); } }
+        self.add_with_note(pid, process_name, exe_path, String::new())
+    }
+
+    pub fn add_with_note(&self, pid: u32, process_name: String, exe_path: Option<String>, note: String) -> Result<()> {
+        let entry = WhitelistEntry { pid, process_name, exe_path, added_at: Utc::now().timestamp_millis(), note };
+        {
+            let mut entries = self.entries.lock().unwrap();
+            if !entries.iter().any(|e| e.pid == pid && pid != 0) {
+                entries.retain(|e| e.exe_path != entry.exe_path || entry.exe_path.is_none());
+                entries.push(entry);
+            }
+        }
         self.persist()
+    }
+
+    pub fn add_path(&self, path: &str, note: &str) -> Result<()> {
+        let name = Path::new(path)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(path)
+            .to_string();
+        self.add_with_note(0, name, Some(path.to_string()), note.to_string())
     }
 
     pub fn remove(&self, pid: u32) -> Result<bool> {

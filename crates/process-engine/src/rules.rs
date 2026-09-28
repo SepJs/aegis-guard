@@ -18,7 +18,21 @@ const NETWORK_TOOLS: &[&str] = &[
     "curl","curl.exe","wget","wget.exe","nc","nc.exe","ncat","ncat.exe","netcat","nmap","nmap.exe",
     "ssh","ssh.exe","scp","scp.exe","sftp","ftp","ftp.exe","telnet","telnet.exe",
     "certutil","certutil.exe","bitsadmin","bitsadmin.exe",
-    "python3","python3.exe","python","python.exe","perl","perl.exe","ruby","ruby.exe","node","node.exe","nodejs","php","lua"
+    "python3","python3.exe","python","python.exe","perl","perl.exe","ruby","ruby.exe","node","node.exe","nodejs","php","lua",
+    "socat","socat.exe","dig","host","nslookup","whois","tftp","tftp.exe"
+];
+
+const LOLBINS: &[&str] = &[
+    "certutil","certutil.exe","bitsadmin","bitsadmin.exe","mshta","mshta.exe",
+    "regsvr32","regsvr32.exe","rundll32","rundll32.exe","msiexec","msiexec.exe",
+    "wmic","wmic.exe","cmstp","cmstp.exe","installutil","installutil.exe",
+    "regasm","regasm.exe","regsvcs","regsvcs.exe","msbuild","msbuild.exe",
+    "csc","csc.exe","jsc","jsc.exe","ilasm","ilasm.exe"
+];
+
+const SUSPICIOUS_PATH_MARKERS: &[&str] = &[
+    "/tmp/", "/dev/shm/", "/var/tmp/", "/run/user/",
+    "\\temp\\", "\\tmp\\", "appdata\\local\\temp", "\\downloads\\"
 ];
 const OFFICE_NAMES: &[&str] = &[
     "soffice","soffice.bin","libreoffice","libreoffice-writer","libreoffice-calc","evince","okular","zathura","abiword","gnumeric",
@@ -33,6 +47,7 @@ const INTERPRETER_NAMES: &[&str] = &[
 pub struct RuleEngine {
     browsers: HashSet<&'static str>, shells: HashSet<&'static str>,
     net_tools: HashSet<&'static str>, office: HashSet<&'static str>, interpreters: HashSet<&'static str>,
+    lolbins: HashSet<&'static str>,
 }
 
 impl RuleEngine {
@@ -43,6 +58,7 @@ impl RuleEngine {
             net_tools: NETWORK_TOOLS.iter().copied().collect(),
             office: OFFICE_NAMES.iter().copied().collect(),
             interpreters: INTERPRETER_NAMES.iter().copied().collect(),
+            lolbins: LOLBINS.iter().copied().collect(),
         }
     }
 
@@ -52,14 +68,21 @@ impl RuleEngine {
         let parent_name = parent.map(|p| p.name.to_lowercase()).unwrap_or_default();
         let ancestors = self.build_ancestors(child.ppid, known);
 
+        // High-confidence first
         if let Some(d) = self.par_001(&child_name, &parent_name, &parent, &ancestors) { return Some(d); }
-        if let Some(d) = self.par_002(&child_name, &ancestors, known) { return Some(d); }
         if let Some(d) = self.par_003(&child_name, &parent_name, &parent, &ancestors) { return Some(d); }
+        if let Some(d) = self.par_009(child, &child_name, &ancestors) { return Some(d); } // suspicious path
+        if let Some(d) = self.par_010(child, &child_name, &parent_name, &ancestors) { return Some(d); } // LOLBin abuse
+        if let Some(d) = self.par_011(child, &child_name, &ancestors) { return Some(d); } // encoded / base64 launch
+        if let Some(d) = self.par_012(child, &child_name, &parent_name, &ancestors) { return Some(d); } // reverse shell patterns
+        if let Some(d) = self.par_002(&child_name, &ancestors, known) { return Some(d); }
         if let Some(d) = self.par_004(child, &child_name, &parent_name, &ancestors) { return Some(d); }
         if let Some(d) = self.par_005(child, &ancestors) { return Some(d); }
         if let Some(d) = self.par_006(child, &child_name, &ancestors) { return Some(d); }
+        if let Some(d) = self.par_013(child, &child_name, &ancestors) { return Some(d); } // hidden / double-extension
         if let Some(d) = self.par_007(child, known, &ancestors) { return Some(d); }
         if let Some(d) = self.par_008(child, known, &ancestors) { return Some(d); }
+        if let Some(d) = self.par_014(child, &child_name, &parent_name, &ancestors) { return Some(d); } // root from user shell
         None
     }
 
@@ -157,6 +180,105 @@ impl RuleEngine {
             rule: "PAR-008".into(), confidence: Confidence::Low,
             reason: format!("PPID {} for process '{}' (pid {}) was previously '{}' but is now '{}'. Possible PID reuse — parent identity may be forged.", child.ppid, child.name, child.pid, recorded.name, live_parent_name),
             parent_exe: recorded.exe.clone(), ancestors: ancestors.to_vec(),
+        })
+    }
+
+    /// PAR-009: Executable launched from suspicious world-writable paths (/tmp, /dev/shm, Temp, Downloads)
+    fn par_009(&self, child: &ProcInfo, child_name: &str, ancestors: &[u32]) -> Option<AnomalyDetail> {
+        let exe = child.exe.as_deref()?.to_lowercase();
+        let is_sus_path = SUSPICIOUS_PATH_MARKERS.iter().any(|m| exe.contains(m));
+        if !is_sus_path { return None; }
+        // Ignore common package managers / installers that legitimately use /tmp
+        if matches!(child_name, "apt" | "apt-get" | "dpkg" | "yum" | "dnf" | "pacman" | "zypper" | "pip" | "pip3" | "npm" | "cargo" | "go") {
+            return None;
+        }
+        Some(AnomalyDetail {
+            rule: "PAR-009".into(), confidence: Confidence::High,
+            reason: format!("Process '{}' (pid {}) launched from suspicious path '{}'. Malware frequently stages payloads in world-writable locations.", child_name, child.pid, exe),
+            parent_exe: None, ancestors: ancestors.to_vec(),
+        })
+    }
+
+    /// PAR-010: Living-Off-The-Land binary abuse (LOLBins) used for download / execution
+    fn par_010(&self, child: &ProcInfo, child_name: &str, parent_name: &str, ancestors: &[u32]) -> Option<AnomalyDetail> {
+        if !self.lolbins.contains(child_name) { return None; }
+        // High risk when spawned by shell or office
+        let risky_parent = self.shells.contains(parent_name) || self.office.contains(parent_name) || self.browsers.contains(parent_name);
+        if !risky_parent { return None; }
+        Some(AnomalyDetail {
+            rule: "PAR-010".into(), confidence: Confidence::High,
+            reason: format!("LOLBin '{}' spawned by '{}'. Living-off-the-land techniques are commonly used to download or execute payloads while blending with legitimate tools.", child_name, parent_name),
+            parent_exe: None, ancestors: ancestors.to_vec(),
+        })
+    }
+
+    /// PAR-011: Command-line indicators of encoded / obfuscated execution
+    fn par_011(&self, child: &ProcInfo, child_name: &str, ancestors: &[u32]) -> Option<AnomalyDetail> {
+        let cmdline = child.cmdline.join(" ").to_lowercase();
+        if cmdline.is_empty() { return None; }
+        let indicators = [
+            "base64", "-enc ", "-encodedcommand", "frombase64string",
+            "iex(", "invoke-expression", "downloadstring", "downloadfile",
+            " -e ", " -c ", "python -c", "perl -e", "ruby -e",
+            "/dev/tcp/", "mkfifo", "bash -i", "sh -i",
+        ];
+        let hit = indicators.iter().find(|&&i| cmdline.contains(i))?;
+        Some(AnomalyDetail {
+            rule: "PAR-011".into(), confidence: Confidence::High,
+            reason: format!("Process '{}' (pid {}) command line contains obfuscation / download indicator '{}'. Classic stager / reverse-shell pattern.", child_name, child.pid, hit),
+            parent_exe: None, ancestors: ancestors.to_vec(),
+        })
+    }
+
+    /// PAR-012: Classic reverse-shell / C2 launch patterns
+    fn par_012(&self, child: &ProcInfo, child_name: &str, parent_name: &str, ancestors: &[u32]) -> Option<AnomalyDetail> {
+        let cmdline = child.cmdline.join(" ").to_lowercase();
+        let is_rev = cmdline.contains("nc -e") || cmdline.contains("ncat -e") || cmdline.contains("bash -i >&")
+            || cmdline.contains("/dev/tcp/") || cmdline.contains("socat tcp")
+            || (cmdline.contains("python -c") && cmdline.contains("socket"))
+            || ((child_name == "bash" || child_name == "sh") && cmdline.contains("-i") && (cmdline.contains(">&") || cmdline.contains("2>&1")));
+        if !is_rev { return None; }
+        Some(AnomalyDetail {
+            rule: "PAR-012".into(), confidence: Confidence::High, // Critical not in enum yet
+            reason: format!("Reverse shell / interactive C2 pattern detected for '{}' (pid {}) spawned by '{}'. Immediate containment recommended.", child_name, child.pid, parent_name),
+            parent_exe: None, ancestors: ancestors.to_vec(),
+        })
+    }
+
+    /// PAR-013: Hidden files or double-extension masquerading
+    fn par_013(&self, child: &ProcInfo, child_name: &str, ancestors: &[u32]) -> Option<AnomalyDetail> {
+        let exe = child.exe.as_deref()?.to_lowercase();
+        let name_lower = child_name.to_lowercase();
+        // Hidden binary (starts with .)
+        if name_lower.starts_with('.') && !name_lower.starts_with("./") {
+            return Some(AnomalyDetail {
+                rule: "PAR-013".into(), confidence: Confidence::Medium,
+                reason: format!("Hidden executable '{}' (pid {}) detected. Attackers often hide binaries with leading-dot names.", child_name, child.pid),
+                parent_exe: None, ancestors: ancestors.to_vec(),
+            });
+        }
+        // Double extension style (e.g. invoice.pdf.exe) — more Windows, but check anyway
+        if exe.matches('.').count() >= 2 && (exe.ends_with(".exe") || exe.ends_with(".elf") || exe.contains(".sh.")) {
+            return Some(AnomalyDetail {
+                rule: "PAR-013".into(), confidence: Confidence::Medium,
+                reason: format!("Suspicious multi-extension path '{}' for process '{}'. Possible social-engineering masquerade.", exe, child_name),
+                parent_exe: None, ancestors: ancestors.to_vec(),
+            });
+        }
+        None
+    }
+
+    /// PAR-014: Privilege escalation indicator — root process spawned from non-root user shell
+    fn par_014(&self, child: &ProcInfo, child_name: &str, parent_name: &str, ancestors: &[u32]) -> Option<AnomalyDetail> {
+        if child.uid != 0 { return None; }
+        if !self.shells.contains(parent_name) { return None; }
+        // Parent should not be root either for this rule (classic sudo/su is expected; we look for unexpected)
+        // We only flag if parent is a user shell that suddenly produced a root child without obvious sudo/su name
+        if matches!(child_name, "sudo" | "su" | "pkexec" | "doas") { return None; }
+        Some(AnomalyDetail {
+            rule: "PAR-014".into(), confidence: Confidence::Medium,
+            reason: format!("Root process '{}' (pid {}) spawned by non-privileged shell '{}'. Review for unexpected privilege escalation.", child_name, child.pid, parent_name),
+            parent_exe: None, ancestors: ancestors.to_vec(),
         })
     }
 

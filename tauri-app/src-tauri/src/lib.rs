@@ -84,13 +84,8 @@ pub fn run() {
 
             let journal = Journal::open(data_dir.join("journal.db")).expect("failed to open journal");
             let engine = ResponseEngine::new(&data_dir).expect("failed to init response engine");
-            let ebpf = Arc::new(ebpf_filter::EbpfFilterManager::new());
 
-            let state = Arc::new(AppState {
-                journal: Mutex::new(journal),
-                response_engine: engine,
-                ebpf_manager: ebpf,
-            });
+            let state = Arc::new(AppState { journal: Mutex::new(journal), response_engine: engine });
             app.manage(state.clone());
 
             let socket = std::env::var("AEGIS_SOCKET").unwrap_or_else(|_| ipc::DEFAULT_SOCKET_PATH.to_string());
@@ -193,17 +188,6 @@ pub fn run() {
             commands::list_user_whitelisted_apps,
             commands::remove_user_whitelisted_app,
             commands::trigger_canary_test,
-            commands::ebpf_init_filter,
-            commands::ebpf_attach_filter,
-            commands::ebpf_detach_filter,
-            commands::ebpf_get_status,
-            commands::ebpf_list_rules,
-            commands::ebpf_add_rule,
-            commands::ebpf_remove_rule,
-            commands::ebpf_toggle_rule,
-            commands::ebpf_get_inspected_packets,
-            commands::ebpf_clear_packets,
-            commands::ebpf_simulate_packet,
         ])
         .run(tauri::generate_context!())
         .expect("error running Tauri application");

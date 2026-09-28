@@ -91,80 +91,88 @@ fn snapshot_linux() -> Result<HashMap<u32, ProcInfo>> {
 
 #[cfg(windows)]
 fn snapshot_windows() -> Result<HashMap<u32, ProcInfo>> {
-    let mut map = HashMap::new();
+    if let Ok(map) = snapshot_windows_wmic() {
+        if !map.is_empty() {
+            return Ok(map);
+        }
+    }
+    snapshot_windows_tasklist()
+}
 
-    // Query Win32_Process for parent PID, command lines, and true executable paths
-    if let Ok(output) = std::process::Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine,ExecutablePath | ConvertTo-Json -Compress"
-        ])
+#[cfg(windows)]
+fn snapshot_windows_wmic() -> Result<HashMap<u32, ProcInfo>> {
+    let output = std::process::Command::new("wmic")
+        .args(["process", "get", "ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine", "/FORMAT:LIST"])
+        .output()?;
+    if !output.status.success() {
+        anyhow::bail!("wmic failed");
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut map = HashMap::new();
+    let mut name = String::new();
+    let mut cmdline = String::new();
+    let mut exe = String::new();
+    let mut pid = 0u32;
+    let mut ppid = 0u32;
+    let flush = |map: &mut HashMap<u32, ProcInfo>, name: &str, cmdline: &str, exe: &str, pid: u32, ppid: u32| {
+        if pid == 0 || name.is_empty() { return; }
+        let cmd_vec = if cmdline.is_empty() { vec![name.to_string()] }
+            else { cmdline.split_whitespace().map(|s| s.to_string()).collect() };
+        map.insert(pid, ProcInfo {
+            pid,
+            ppid,
+            name: name.to_string(),
+            cmdline: cmd_vec,
+            exe: if exe.is_empty() { Some(name.to_string()) } else { Some(exe.to_string()) },
+            cwd: None,
+            uid: 1000,
+            gid: 1000,
+            start_time: 0,
+        });
+    };
+    for line in stdout.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            flush(&mut map, &name, &cmdline, &exe, pid, ppid);
+            name.clear(); cmdline.clear(); exe.clear(); pid = 0; ppid = 0;
+            continue;
+        }
+        if let Some(v) = line.strip_prefix("CommandLine=") { cmdline = v.trim().to_string(); }
+        else if let Some(v) = line.strip_prefix("ExecutablePath=") { exe = v.trim().to_string(); }
+        else if let Some(v) = line.strip_prefix("Name=") { name = v.trim().to_string(); }
+        else if let Some(v) = line.strip_prefix("ParentProcessId=") { ppid = v.trim().parse().unwrap_or(0); }
+        else if let Some(v) = line.strip_prefix("ProcessId=") { pid = v.trim().parse().unwrap_or(0); }
+    }
+    flush(&mut map, &name, &cmdline, &exe, pid, ppid);
+    Ok(map)
+}
+
+#[cfg(windows)]
+fn snapshot_windows_tasklist() -> Result<HashMap<u32, ProcInfo>> {
+    let mut map = HashMap::new();
+    if let Ok(output) = std::process::Command::new("tasklist")
+        .args(["/FO", "CSV", "/NH"])
         .output()
     {
-        if let Ok(json_str) = String::from_utf8(output.stdout) {
-            #[derive(serde::Deserialize)]
-            struct WinProc {
-                #[serde(rename = "ProcessId")]
-                process_id: u32,
-                #[serde(rename = "ParentProcessId")]
-                parent_process_id: Option<u32>,
-                #[serde(rename = "Name")]
-                name: Option<String>,
-                #[serde(rename = "CommandLine")]
-                command_line: Option<String>,
-                #[serde(rename = "ExecutablePath")]
-                executable_path: Option<String>,
-            }
-
-            if let Ok(procs) = serde_json::from_str::<Vec<WinProc>>(&json_str) {
-                for p in procs {
-                    if p.process_id == 0 { continue; }
-                    let name = p.name.unwrap_or_else(|| format!("proc-{}", p.process_id));
-                    let cmdline = p.command_line.map(|c| vec![c]).unwrap_or_else(|| vec![name.clone()]);
-                    map.insert(p.process_id, ProcInfo {
-                        pid: p.process_id,
-                        ppid: p.parent_process_id.unwrap_or(0),
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            let fields: Vec<&str> = line.split("\",\"").collect();
+            if fields.len() >= 2 {
+                let name = fields[0].trim_matches('"').to_string();
+                let pid_str = fields[1].trim_matches('"').replace(',', "");
+                if let Ok(pid) = pid_str.parse::<u32>() {
+                    if pid == 0 { continue; }
+                    map.insert(pid, ProcInfo {
+                        pid,
+                        ppid: 0,
                         name: name.clone(),
-                        cmdline,
-                        exe: p.executable_path.or_else(|| Some(format!("C:\\Windows\\System32\\{}", name))),
+                        cmdline: vec![name.clone()],
+                        exe: Some(name),
                         cwd: None,
                         uid: 1000,
                         gid: 1000,
                         start_time: 0,
                     });
-                }
-            }
-        }
-    }
-
-    // Fallback to tasklist if PowerShell query produced no results
-    if map.is_empty() {
-        if let Ok(output) = std::process::Command::new("tasklist")
-            .args(["/FO", "CSV", "/V", "/NH"])
-            .output()
-        {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            for line in stdout.lines() {
-                let fields: Vec<&str> = line.split("\",\"").collect();
-                if fields.len() >= 2 {
-                    let name = fields[0].trim_matches('"').to_string();
-                    let pid_str = fields[1].trim_matches('"');
-                    if let Ok(pid) = pid_str.parse::<u32>() {
-                        if pid == 0 { continue; }
-                        map.insert(pid, ProcInfo {
-                            pid,
-                            ppid: 0,
-                            name: name.clone(),
-                            cmdline: vec![name.clone()],
-                            exe: Some(format!("C:\\Windows\\System32\\{}", name)),
-                            cwd: None,
-                            uid: 1000,
-                            gid: 1000,
-                            start_time: 0,
-                        });
-                    }
                 }
             }
         }

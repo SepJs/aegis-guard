@@ -4,7 +4,41 @@ use rayon::prelude::*;
 use tracing::{debug, warn};
 use walkdir::WalkDir;
 
-use crate::{classify::{classify_entropy, build_note, guess_mime, shannon_entropy}, models::{FileScanResult, RiskLevel, ScanRequest, ScanSummary}};
+use crate::{classify::{classify_entropy_with_mime, build_note, guess_mime, shannon_entropy, signature_scan}, models::{FileScanResult, RiskLevel, ScanRequest, ScanSummary}};
+
+pub fn scan_bytes(path: &str, data: &[u8]) -> ScanSummary {
+    let started = Instant::now();
+    let size = data.len() as u64;
+    let mime = guess_mime(&data[..data.len().min(16)]).to_string();
+    let h = shannon_entropy(data);
+    let mut risk = classify_entropy_with_mime(h, &mime);
+    let mut note = build_note(h, &risk, &mime);
+    if let Some(sig) = signature_scan(data) {
+        note = format!("{} | {}", note, sig);
+        // Elevate risk when a strong signature hits
+        if risk != RiskLevel::High {
+            risk = RiskLevel::High;
+        }
+    }
+    let high_risk = if risk == RiskLevel::High { 1 } else { 0 };
+    let medium_risk = if risk == RiskLevel::Medium { 1 } else { 0 };
+    ScanSummary {
+        total_files: 1,
+        scanned_files: 1,
+        skipped_files: 0,
+        high_risk,
+        medium_risk,
+        results: vec![FileScanResult {
+            path: path.to_string(),
+            size_bytes: size,
+            entropy: Some(h),
+            risk,
+            mime_guess: mime,
+            note,
+        }],
+        elapsed_ms: started.elapsed().as_millis() as u64,
+    }
+}
 
 pub fn scan_path(req: ScanRequest) -> Result<ScanSummary> {
     let started = Instant::now();
@@ -49,8 +83,14 @@ fn scan_file(path: &Path, max_bytes: u64, skipped: &Arc<Mutex<usize>>) -> FileSc
     };
     let mime = guess_mime(&data[..data.len().min(16)]).to_string();
     let h = shannon_entropy(&data);
-    let risk = classify_entropy(h);
-    let note = build_note(h, &risk, &mime);
+    let mut risk = classify_entropy_with_mime(h, &mime);
+    let mut note = build_note(h, &risk, &mime);
+    if let Some(sig) = signature_scan(&data) {
+        note = format!("{} | {}", note, sig);
+        if risk != RiskLevel::High {
+            risk = RiskLevel::High;
+        }
+    }
     debug!(path = %path.display(), entropy = h, risk = %risk, "scanned");
     FileScanResult { path: path_str, size_bytes: size, entropy: Some(h), risk, mime_guess: mime, note }
 }

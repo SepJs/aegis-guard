@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Aegis-Guard (Dev)
+Comment=Run Aegis-Guard from source tree
+Exec=bash -c 'cd "$(dirname "%k")/../.." && (x-terminal-emulator -e bash aegis.sh || xterm -e bash aegis.sh)'
+Icon=aegis-guard
+Terminal=false
+Categories=System;Security;
+StartupNotify=true

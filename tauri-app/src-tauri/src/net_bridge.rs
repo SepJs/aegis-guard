@@ -73,6 +73,7 @@ fn handle_net_event(ev: NetEvent, state: &Arc<AppState>, app: &AppHandle) {
         let severity = match alert.confidence.as_str() { "high" => Severity::High, "medium" => Severity::Medium, _ => Severity::Low };
         let incident = ThreatIncident {
             id: Uuid::new_v4().to_string(), kind: format!("network_{}", alert.category.to_lowercase()), severity,
+            risk_score: match alert.confidence.as_str() { "high" => 90.0, "medium" => 60.0, _ => 30.0 },
             pid: ev.pid, ppid: 0, process: ev.process.clone(), cmdline: vec![], exe_path: None,
             rule: alert.rule.clone(), confidence: alert.confidence.clone(), reason: alert.reason.clone(),
             ancestors: vec![], ts: Utc.timestamp_millis_opt(ev.ts_ms).unwrap(), resolved: false, digest: String::new(),

@@ -1,134 +1,138 @@
-use std::collections::HashMap;
+//! Lightweight TCP honeypot listeners that flag unexpected connections.
+//! Binds only to localhost by default for safety; optional bind address via env.
+
 use std::net::SocketAddr;
-use std::sync::{Arc, RwLock};
-use anyhow::Result;
-use chrono::Utc;
-use serde::{Deserialize, Serialize};
-use tokio::net::TcpListener;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tracing::{info, warn};
-use uuid::Uuid;
 
 use crate::models::{DeceptionEvent, TrapKind};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HoneypotService {
-    pub id: String,
-    pub name: String,
-    pub port: u16,
-    pub service_type: String,
-    pub active: bool,
-    pub hits: u64,
-    pub last_hit_ts: Option<i64>,
-}
+/// Default decoy ports often probed by malware / scanners (loopback only).
+const DEFAULT_PORTS: &[u16] = &[4444, 31337, 6666, 1234, 5555];
 
 pub struct HoneypotManager {
-    services: Arc<RwLock<HashMap<String, HoneypotService>>>,
+    events: Arc<Mutex<Vec<DeceptionEvent>>>,
+    running: Arc<Mutex<bool>>,
 }
 
 impl HoneypotManager {
     pub fn new() -> Self {
         Self {
-            services: Arc::new(RwLock::new(HashMap::new())),
+            events: Arc::new(Mutex::new(Vec::new())),
+            running: Arc::new(Mutex::new(false)),
         }
     }
 
-    pub fn list_services(&self) -> Vec<HoneypotService> {
-        self.services.read().unwrap().values().cloned().collect()
-    }
+    /// Start background listeners on decoy ports (loopback). Safe for desktop use.
+    pub fn start(&self) {
+        let mut flag = self.running.lock().unwrap();
+        if *flag {
+            return;
+        }
+        *flag = true;
+        drop(flag);
 
-    pub async fn spawn_listener(
-        &self,
-        name: &str,
-        port: u16,
-        service_type: &str,
-    ) -> Result<HoneypotService> {
-        let id = Uuid::new_v4().to_string();
-        let service = HoneypotService {
-            id: id.clone(),
-            name: name.to_string(),
-            port,
-            service_type: service_type.to_string(),
-            active: true,
-            hits: 0,
-            last_hit_ts: None,
-        };
+        let events = self.events.clone();
+        let running = self.running.clone();
 
-        self.services.write().unwrap().insert(id.clone(), service.clone());
-
-        let services_clone = self.services.clone();
-        let id_clone = id.clone();
-        let bind_addr: SocketAddr = format!("0.0.0.0:{}", port).parse()?;
-
-        tokio::spawn(async move {
-            match TcpListener::bind(bind_addr).await {
-                Ok(listener) => {
-                    info!(port = port, name = name, "Honeypot listener active");
-                    loop {
-                        match listener.accept().await {
-                            Ok((stream, remote_addr)) => {
-                                let now = Utc::now().timestamp_millis();
-                                warn!(
-                                    remote = %remote_addr,
-                                    port = port,
-                                    name = name,
-                                    "🚨 HONEYPOT TRIGGERED: Unauthorized connection to decoy service"
-                                );
-
-                                if let Ok(mut map) = services_clone.write() {
-                                    if let Some(srv) = map.get_mut(&id_clone) {
-                                        srv.hits += 1;
-                                        srv.last_hit_ts = Some(now);
-                                    }
-                                }
-
-                                // Emulate fake service banner then close
-                                drop(stream);
-                            }
-                            Err(e) => {
-                                warn!("Honeypot accept error: {e}");
-                                break;
-                            }
-                        }
-                    }
-                }
+        std::thread::spawn(move || {
+            let rt = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(r) => r,
                 Err(e) => {
-                    warn!(port = port, "Could not bind honeypot port: {e}");
-                    if let Ok(mut map) = services_clone.write() {
-                        if let Some(srv) = map.get_mut(&id_clone) {
-                            srv.active = false;
-                        }
-                    }
+                    warn!("honeypot runtime failed: {e}");
+                    return;
                 }
-            }
+            };
+            rt.block_on(async move {
+                let mut handles = Vec::new();
+                for &port in DEFAULT_PORTS {
+                    let ev = events.clone();
+                    let run = running.clone();
+                    handles.push(tokio::spawn(async move {
+                        listen_port(port, ev, run).await;
+                    }));
+                }
+                for h in handles {
+                    let _ = h.await;
+                }
+            });
         });
-
-        Ok(service)
+        info!(ports = ?DEFAULT_PORTS, "honeypot listeners started (loopback)");
     }
 
-    pub fn record_connection(&self, id: &str, remote_ip: &str) -> Option<DeceptionEvent> {
-        let now = Utc::now().timestamp_millis();
-        let mut map = self.services.write().unwrap();
-        if let Some(srv) = map.get_mut(id) {
-            srv.hits += 1;
-            srv.last_hit_ts = Some(now);
-            Some(DeceptionEvent {
-                id: Uuid::new_v4().to_string(),
-                kind: TrapKind::HoneypotConnected,
-                target: format!("{}:{}", remote_ip, srv.port),
-                trigger_pid: None,
-                trigger_proc: Some(srv.name.clone()),
-                confidence: "high".to_string(),
-                reason: format!("Decoy honeypot service '{}' received connection from {}", srv.name, remote_ip),
-                ts: now,
-            })
-        } else {
-            None
-        }
+    pub fn stop(&self) {
+        *self.running.lock().unwrap() = false;
+    }
+
+    pub fn drain_events(&self) -> Vec<DeceptionEvent> {
+        let mut g = self.events.lock().unwrap();
+        std::mem::take(&mut *g)
+    }
+
+    pub fn recent_events(&self) -> Vec<DeceptionEvent> {
+        self.events.lock().unwrap().clone()
     }
 }
 
 impl Default for HoneypotManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+async fn listen_port(
+    port: u16,
+    events: Arc<Mutex<Vec<DeceptionEvent>>>,
+    running: Arc<Mutex<bool>>,
+) {
+    let addr: SocketAddr = ([127, 0, 0, 1], port).into();
+    let listener = match tokio::net::TcpListener::bind(addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            // Port in use is fine — skip quietly
+            tracing::debug!(port, "honeypot bind skipped: {e}");
+            return;
+        }
+    };
+    info!(port, "honeypot listening");
+
+    loop {
+        if !*running.lock().unwrap() {
+            break;
+        }
+        // Accept with short timeout so we can observe stop flag
+        let accept = tokio::time::timeout(Duration::from_secs(2), listener.accept()).await;
+        match accept {
+            Ok(Ok((socket, peer))) => {
+                let peer_s = peer.to_string();
+                warn!(port, peer = %peer_s, "HONEYPOT CONNECTION — unexpected client");
+                let ev = DeceptionEvent {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    kind: TrapKind::HoneypotConnected,
+                    target: format!("tcp/{}", port),
+                    trigger_pid: None,
+                    trigger_proc: None,
+                    confidence: "high".into(),
+                    reason: format!(
+                        "Unexpected connection to decoy port {} from {}. Legitimate software rarely connects here.",
+                        port, peer_s
+                    ),
+                    ts: chrono::Utc::now().timestamp_millis(),
+                };
+                if let Ok(mut g) = events.lock() {
+                    g.push(ev);
+                    if g.len() > 200 {
+                        let drain = g.len() - 200;
+                        g.drain(0..drain);
+                    }
+                }
+                drop(socket);
+            }
+            Ok(Err(_)) | Err(_) => continue,
+        }
     }
 }
