@@ -37,6 +37,7 @@ function AppShell() {
           <div className="tb-stat">PROCS <span>{store.nodes.size}</span></div>
           <div className="tb-stat">THREATS <span style={{ color: "var(--redl)" }}>{store.openCount}</span></div>
           <div className="tb-stat" style={{ borderLeft: "1px solid var(--vd)" }}>DEFENSE <span style={{ color: "var(--teall)" }}>ACTIVE</span></div>
+          <div className="tb-stat" style={{ borderColor: "rgba(13,148,136,0.4)", background: "rgba(13,148,136,0.08)" }}>SOURCE <span style={{ color: "var(--teall)", fontWeight: 700 }}>● LIVE LINUX KERNEL</span></div>
           <button
             id="btn-open-install-modal"
             className="sm-btn"

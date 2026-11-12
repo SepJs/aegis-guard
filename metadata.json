@@ -1,0 +1,6 @@
+{
+  "name": "Aegis-Guard",
+  "description": "Native Endpoint Security & Network Intrusion Detection Suite",
+  "permissions": [],
+  "capabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

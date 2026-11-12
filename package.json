@@ -4,9 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "npm --prefix tauri-app run dev -- --host 0.0.0.0 --port 3000",
+    "dev": "tsx server.ts",
     "build": "npm --prefix tauri-app run build && rm -rf dist && cp -r tauri-app/dist ./dist",
     "lint": "npm --prefix tauri-app run build",
+    "start": "tsx server.ts",
     "postinstall": "npm --prefix tauri-app install"
   },
   "devDependencies": {
@@ -18,7 +19,10 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
+    "@types/express": "^5.0.6",
+    "express": "^5.3.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "tsx": "^4.23.15"
   }
 }
