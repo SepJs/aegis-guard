@@ -1,164 +1,121 @@
-# Aegis-Guard — Native Endpoint Security & Intrusion Detection Suite
+# Aegis-Guard — Endpoint Security, Antivirus & Network IDS Suite
 
-[![App Version](https://img.shields.io/badge/App_Version-1.1.0-0d9488?style=flat-square)](https://github.com/SepJs/aegis-guard)
+[![App Version](https://img.shields.io/badge/App_Version-1.2.0-0d9488?style=flat-square)](https://github.com/SepJs/aegis-guard)
 [![Engine Version](https://img.shields.io/badge/Core_Engine-v4.6.0-6366f1?style=flat-square)](https://github.com/SepJs/aegis-guard)
 [![License](https://img.shields.io/badge/License-MIT_or_Apache_2.0-blue?style=flat-square)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-Linux_%7C_Windows-orange?style=flat-square)](https://github.com/SepJs/aegis-guard)
+[![Platform](https://img.shields.io/badge/Platform-Linux_%7C_macOS_%7C_Windows-orange?style=flat-square)](https://github.com/SepJs/aegis-guard)
 
-**Aegis-Guard** is a high-performance, real-time native endpoint defense and network intrusion detection system (IDS) engineered in **Rust, Go, and React/TypeScript (Tauri v2)**. It provides deep behavioral telemetry, live process lineage inspection, Shannon entropy malware forensics, canary honeypots, and tamper-evident cryptographic audit logs.
-
----
-
-## Architecture & Real Engine Execution
-
-Aegis-Guard operates with zero mock dependencies:
-
-```
-                                  ┌───────────────────────────────┐
-                                  │      Desktop Dashboard UI     │
-                                  │   (Tauri v2 + React 18 / TS)  │
-                                  └───────────────┬───────────────┘
-                                                  │ IPC (Unix Socket / Named Pipe)
-         ┌────────────────────────────────────────┼────────────────────────────────────────┐
-         │                                        │                                        │
-         ▼                                        ▼                                        ▼
-┌──────────────────┐                    ┌──────────────────┐                    ┌──────────────────┐
-│  Process Engine  │                    │ Network Observer │                    │  Active Defense  │
-│  (Rust / procfs) │                    │(Go / Raw Sockets)│                    │(BLAKE3 + nsenter)│
-└────────┬─────────┘                    └────────┬─────────┘                    └────────┬─────────┘
-         │ /proc telemetry                       │ Promiscuous & PCAP                    │ SIGTERM / SIGKILL
-         ▼                                       ▼                                       ▼
-┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
-│                                    Host Operating System Kernel                                  │
-└──────────────────────────────────────────────────────────────────────────────────────────────────┘
-```
-
-1. **Native Daemon Mode (Desktop / Production)**:
-   - The core process engine runs as a native system daemon (`aegis-process-engine`) inspecting `/proc` lineage, CPU, and RSS memory.
-   - The Go network observer (`aegis-network-observer`) attaches to raw network interfaces via PCAP/raw sockets to sniff anomalies and detect packet flooding.
-   - The desktop client connects over high-speed IPC sockets (`/run/aegis/engine.sock` on Linux or `\\.\pipe\aegis` on Windows).
-2. **Web / Air-Gapped Simulation Engine**:
-   - When previewed in a sandboxed web browser, Aegis-Guard automatically activates its internal **Aegis Heuristic Security Engine** (`securityEngine.ts`), providing full live mathematical computation (such as true Shannon entropy $H = -\sum p_i \log_2(p_i)$), simulated process lineage, real-time IDS event emission, and BLAKE3 cryptographic hash verification.
+**Aegis-Guard** is a native endpoint detection, antivirus, and network intrusion detection suite built with **Rust, Go, TypeScript/Node.js, and React (Tauri v2)**. It combines live OS process and `/proc` behavioral telemetry, multi-signature byte and command-line malware detection, L3/L4 packet inspection, Shannon entropy forensics, canary tripwires, and tamper-evident audit chains.
 
 ---
 
-## Core Capabilities & Subsystems
+## Architecture
 
-### 1. 🛡️ User Application Safeguard (Anti-False-Positive Triage)
-- **Heuristic Doubt Engine**: Unlike aggressive commercial AVs that automatically wipe unknown developer scripts or compiled binaries, Aegis-Guard flags suspicious items as `suspicious` rather than instantly deleting them.
-- **Three-Way User Verdict Workflow**:
-  1. **Trust & Whitelist (Safeguard)**: Marks the binary as your trusted developer tool, exempting it from automated scans and recording its SHA-256 hash.
-  2. **Isolate in Sandbox Jail**: Launches the sample inside an air-gapped Linux container (cgroups v2 + mount namespaces) to observe syscalls, dropped files, and network activity safely.
-  3. **Confirm Threat & Quarantine**: Neutralizes verified malicious payloads into an encrypted AES-256 quarantine vault (`/var/lib/aegis/quarantine` on Linux, `C:\ProgramData\Aegis-Guard\quarantine` on Windows).
+```
+                                  +-------------------------------+
+                                  |      Dashboard & Console      |
+                                  |  (Tauri v2 / React 18 / Web)  |
+                                  +---------------+---------------+
+                                                  | IPC (/api/ipc + SSE or Local Socket)
+         +----------------------------------------+----------------------------------------+
+         |                                        |                                        |
+         v                                        v                                        v
++------------------+                    +------------------+                    +------------------+
+|  Process & AV    |                    | Network Observer |                    |  Active Defense  |
+|  Engine (Rust /  |                    | (Go + /proc/net  |                    |  & Audit Chain   |
+|  Node Telemetry) |                    |   packet guard)  |                    |  (BLAKE3/SHA-256)|
++--------+---------+                    +--------+---------+                    +--------+---------+
+         | /proc, exe bytes                      | socket, ARP, SNMP                     | SIGSTOP/KILL, null-route
+         v                                       v                                       v
++--------------------------------------------------------------------------------------------------+
+|                                    Host Operating System Kernel                                  |
++--------------------------------------------------------------------------------------------------+
+```
 
-### 2. ⚡ Network Intrusion Detection System (IDS) & Anti-Sniffing
-- **Real-Time Attack Detection**:
-  - **Packet Sniffing / Promiscuous Mode**: Detects unauthorized packet capture tools (`tcpdump`, `wireshark`, raw AF_PACKET sockets).
-  - **SYN Flood Denial-of-Service**: Detects asymmetric TCP half-open connection spikes.
-  - **Stealth Port Scan**: Flags SYN/FIN stealth reconnaissance sweeps across system ports.
-  - **Reverse TCP C2**: Identifies unauthorized outbound reverse shells connecting to external command-and-control servers.
-  - **DNS Tunneling / Data Exfiltration**: Discovers base64-encoded binary exfiltration over recursive DNS queries.
-- **Interactive Defense Actions**:
-  - **One-Click IP Null-Routing**: Block attacking IP addresses on the host firewall.
-  - **Unblock & Lift**: Instantly restore connectivity for false-flagged IPs.
-  - **Attack Simulation Suite**: Built-in test buttons to safely trigger and verify each attack signature.
-
-### 3. 🔬 Shannon Entropy File Forensics
-- Calculates exact mathematical byte entropy:
-  $$H(X) = -\sum_{i=0}^{255} P(x_i) \log_2 P(x_i)$$
-- Detects obfuscated payloads, crypters, packed malware (UPX, Themida), and ransomware-encrypted files.
-- Generates 256-byte frequency histograms and real-time entropy status classification.
-
-### 4. 🔗 Cryptographic BLAKE3 Audit Chain
-- Every remediation action (process kill, quarantine, whitelist, engine update) generates a block linked to the previous entry's cryptographic hash:
-  $$\text{Digest}_n = \text{BLAKE3}(\text{Digest}_{n-1} \parallel \text{Action} \parallel \text{PID} \parallel \text{Timestamp})$$
-- Built-in audit verifier traverses the chain from genesis to head, guaranteeing that forensic records have not been altered or tampered with.
-
-### 5. 🍯 Canary Honeytokens & Deception Tripwires
-- Deploys deceptive decoy files (`.aws/credentials`, `wallet.dat`, `id_rsa`) to detect unauthorized directory traversal or ransomware indexing before production files are touched.
-
-### 6. 🔄 Live Engine Hotpatching & Auto-Update
-- **Zero-Downtime Signature Engine**: Live-updates the core threat detection rules (current **v4.6.0**) with a single click or automatically in the background.
-- Logs hotpatch applications directly into the BLAKE3 audit ledger.
+1. **Native Engine & Daemon Mode (Desktop / System Service)**:
+   - `aegis-process-engine` (Rust crates under `crates/`) inspects `/proc` lineage, CPU/RSS metrics, Shannon entropy, canary files, and maintains a BLAKE3 audit ledger over local IPC (`/run/aegis/engine.sock` on Linux, `\\.\pipe\aegis` on Windows).
+   - `aegis-network-observer` (Go daemon under `network-observer/`) monitors L3/L4 flows, SYN floods, port sweeps, ARP collisions, and DNS tunneling via raw sockets / TCP bridge (`127.0.0.1:50053`).
+2. **Console & Web Server Mode (`server.ts` + `server-security.ts`)**:
+   - Serves the full dashboard on port `3000` with live host `/proc` polling, live process and binary antivirus scanning, directory & upload scanning, `/proc/net` + `/proc/net/snmp` inspection, Go TCP bridge forwarding, persisted system policy (`system_settings.json`), and SHA-256 chained audit records.
 
 ---
 
-## Installation Guide
+## Core Capabilities
 
-### Option A: Linux Automated 1-Click Install (Recommended)
+### 1. Live Antivirus & Malware Detection Engine
+- **24 Built-in Malware Signatures (`AV-000` to `AV-023`)**: Covers EICAR, packed UPX ELF binaries, XMRig cryptominers, Kinsing droppers, C99/Weevely webshells, Bash/Python/Perl/Ruby reverse shells, `memfd_create` fileless execution, LD_PRELOAD rootkits, Mirai/Cobalt Strike staging, `/etc/shadow` credential dumping, and AES/ChaCha20 ransomware routines.
+- **Live `/proc` Executable & Command Inspection**: Continuously inspects active running processes (`cmdline` + bounded `/proc/<pid>/exe` reads) and flags malicious binaries or scripts with `VIRUS SIGNATURE` rules.
+- **Quick System AV Scan & Host Scanner**: One-click full sweep over live `/proc` processes and volatile host staging paths (`/dev/shm`, `/var/tmp`, data vault), alongside recursive directory scanning and binary file upload inspection.
+- **Three-Way Suspicious Software Triage**: Ambiguous or custom developer binaries can be moved to **User Apps Safeguard (Whitelist)** with SHA-256 pinning, isolated in a **Read-Only Byte Sandbox**, or confirmed into **`chmod 000` Quarantine**.
 
-Run the automated installer script:
+### 2. Network IDS & High-Performance Packet Inspector
+- **Go Network Observer Bridge + `/proc/net/snmp` Fallback**: Real-time L3/L4 counters (segments/sec, TCP retransmits, SYN_RECV backlog, UDP/ICMP rates), ARP neighbor verification (`/proc/net/arp`), and per-socket process attribution.
+- **Automated Anomaly Rules**: Detects SYN floods, horizontal port sweeps, reverse C2 ports, ARP MAC collisions, and high-entropy DNS tunneling queries with manual or automatic IP null-routing.
 
-```bash
-curl -sSL https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/auto-install.sh | sudo bash
-```
+### 3. Noise-Filtered Behavioral Priority Engine
+- Calibration rules distinguish standard system daemons, browsers, runtimes, and desktop services from suspicious execution chains (such as web servers spawning shells, `/tmp` or `/dev/shm` hidden execution, and privilege escalation) so routine workloads do not trigger false `CRITICAL` alerts.
 
-Or from a local clone:
+### 4. Shannon Entropy Forensics & Isolated Byte Sandbox
+- Computes exact byte-level Shannon entropy ($H(X) = -\sum_{i=0}^{255} P(x_i) \log_2 P(x_i)$) to spot packed executables and encrypted ransomware payloads.
+- Isolates inspected targets into `chmod 0400` read-only sandbox vaults with automatic IP, domain, ELF/shebang header, and indicator extraction.
 
+### 5. Runtime Settings & Cryptographic Audit Integrity
+- **Persisted System Policies**: Toggle Real-Time Process & Binary AV, Active Process Kill, Syscall Audit, Log Pruner, and UI themes directly from **Settings**, persisted in host storage (`system_settings.json`) and enforced live by the backend.
+- **Tamper-Evident Audit Chain**: Every kill, quarantine, whitelist, policy change, and engine update appends a hash-chained audit record (SHA-256 on the Node console server; BLAKE3 in the Rust `active-defense` crate) verifiable from genesis to head.
+
+---
+
+## Multi-Platform Installation (Console & Desktop)
+
+### Linux (Debian / Ubuntu / Fedora / Arch / openSUSE)
 ```bash
 git clone https://github.com/SepJs/aegis-guard.git
 cd aegis-guard
-sudo bash installers/install-linux.sh
+
+# Console / headless server mode (non-interactive)
+sudo bash installers/install-linux.sh --console --yes
+
+# Or full native Desktop + Systemd services
+sudo bash installers/install-linux.sh --desktop
 ```
-
-**What the Linux installer does:**
-1. Detects package manager (`apt`, `dnf`, `pacman`, `zypper`) and installs required native libraries (`webkit2gtk-4.1`, `gtk3`, `libayatana-appindicator3`).
-2. Compiles Rust workspace release binaries (`aegis-process-engine`) and Go observer (`aegis-network-observer`).
-3. Installs and enables `systemd` background services:
-   - `aegis-process-engine.service` (runs as `root` for procfs inspection)
-   - `aegis-network-observer.service` (runs as `root` for packet capture)
-4. Configures persistent `/run/aegis` runtime socket permissions via `systemd-tmpfiles`.
-5. Creates the desktop application launcher (`Aegis-Guard.desktop`).
-
-To uninstall:
+Or run directly via curl:
 ```bash
-sudo bash installers/uninstall-linux.sh
+curl -fsSL https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/install-linux.sh | sudo bash -s -- --console --yes
 ```
+Installs the `aegis-guard` CLI command under `/usr/local/bin/aegis-guard`. Run `aegis-guard --console` anytime to launch the console suite on port `3000`.
 
----
+### macOS (Apple Silicon & Intel)
+```bash
+git clone https://github.com/SepJs/aegis-guard.git
+cd aegis-guard
 
-### Option B: Windows Installation (Windows 10 / 11 / Server)
+# Console mode (auto-configures Homebrew Node/Rust/Go paths)
+bash installers/install-macos.sh --console --yes
 
-Open an **Elevated PowerShell** (Run as Administrator):
+# Or native macOS Desktop build
+bash installers/install-macos.sh --desktop
+```
+Installs `aegis-guard` into `/opt/homebrew/bin` (Apple Silicon) or `/usr/local/bin` (Intel).
 
+### Windows 10 / 11 / Server (Administrator PowerShell)
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/install-windows.ps1 | iex"
-```
-
-Or run the 1-click batch file:
-1. Right-click `installers\1-CLICK-INSTALL-WINDOWS.bat`
-2. Select **"Run as administrator"**
-
-**What the Windows installer does:**
-1. Requests UAC administrative elevation.
-2. Checks for Evergreen Microsoft WebView2 runtime (automatically installs if missing).
-3. Provisions secure quarantine paths (`C:\ProgramData\Aegis-Guard\quarantine`) with restrictive access control lists (`icacls`).
-4. Registers and starts the `AegisGuardService` background service.
-5. Adds Start Menu and Desktop shortcuts.
-
----
-
-### Option C: Quick Development / Live Preview Mode
-
-To launch and run Aegis-Guard locally without installing system-wide services:
-
-```bash
-# Clone the repository
 git clone https://github.com/SepJs/aegis-guard.git
 cd aegis-guard
 
-# Install Node dependencies
-npm install
+# Console mode (configures Defender exclusions, firewall port 3000, and PATH CLI)
+powershell -NoProfile -ExecutionPolicy Bypass -File installers\install-windows.ps1 -ConsoleOnly
 
-# Start the live development server (bound to port 3000)
-npm run dev
+# Or Desktop + Windows Service mode
+powershell -NoProfile -ExecutionPolicy Bypass -File installers\install-windows.ps1
 ```
+You can also double-click or run `installers\install-windows.bat` as Administrator.
 
-Or run the automated Unix launcher script:
-
+### Quick Cross-Platform Dev / Console Launch
 ```bash
-bash aegis.sh
+bash aegis.sh --console
 ```
+
+For full details, uninstall instructions, and per-OS filesystem paths, see [INSTALLATION.md](./INSTALLATION.md).
 
 ---
 
@@ -168,52 +125,49 @@ bash aegis.sh
 aegis-guard/
 ├── README.md
 ├── INSTALLATION.md
-├── Cargo.toml                 # Rust workspace
-├── Makefile
-├── package.json               # Root npm scripts
-├── aegis.sh                   # Dev one-shot launcher
+├── Cargo.toml                      # Rust workspace manifest
+├── Makefile                        # Build & console targets (`make run-console`)
+├── package.json                    # Root server & frontend scripts (v1.2.0)
+├── aegis.sh                        # Cross-platform Unix console/desktop launcher
+├── server.ts                       # Node/Express IPC, telemetry & live AV server
+├── server-security.ts              # 24 AV signatures, Shannon entropy & threat scoring
+├── server-security.test.ts         # Unit tests for AV detection & scoring logic
 │
-├── crates/                    # Rust security engines
-│   ├── process-engine/        # Process lineage & rules
-│   ├── active-defense/        # Kill / quarantine / audit
-│   ├── behavioral/            # Baseline & anomaly scores
-│   ├── deception/             # Canaries, traps, honeypots
-│   ├── entropy/               # Shannon forensics + signatures
-│   ├── threat-intel/          # IOC feeds & matcher
-│   ├── journal/               # SQLite incident store
-│   ├── ipc/                   # Local IPC protocol
-│   ├── self-protect/          # Anti-tamper
-│   └── updater/               # GitHub release checker
+├── crates/                         # Native Rust security crates
+│   ├── active-defense/             # Signal enforcement, quarantine & BLAKE3 ledger
+│   ├── behavioral/                 # Baseline & anomaly scoring
+│   ├── deception/                  # Canary tokens & tripwires
+│   ├── entropy/                    # Shannon forensics & signatures
+│   ├── ipc/                        # Local IPC protocol
+│   ├── journal/                    # SQLite incident store
+│   ├── process-engine/             # /proc lineage & rule engine
+│   ├── self-protect/               # Anti-tamper guard
+│   ├── threat-intel/               # IOC feeds & matcher
+│   └── updater/                    # Release update verifier
 │
-├── network-observer/          # Go network IDS daemon
-├── tauri-app/                 # React UI + Tauri desktop shell
+├── network-observer/               # Go L3/L4 packet inspection & IDS daemon
+├── tauri-app/                      # React 18 UI + Tauri v2 desktop wrapper
+│   ├── src/                        # Components, hooks, IPC bridge, styles
+│   └── src-tauri/                  # Rust Tauri command bindings
 │
-├── installers/                # All install / uninstall scripts
-│   ├── install-linux.sh
-│   ├── uninstall-linux.sh
-│   ├── auto-install.sh
-│   ├── setup-systemd.sh
-│   ├── install-windows.ps1
-│   ├── install-windows.bat
-│   ├── 1-CLICK-INSTALL-WINDOWS.bat
-│   └── install-desktop-launcher.sh
+├── installers/                     # Platform installers & uninstaller
+│   ├── install-linux.sh            # Linux Console & Desktop installer
+│   ├── install-macos.sh            # macOS Console & Desktop installer
+│   ├── install-windows.ps1         # Windows PowerShell installer
+│   ├── install-windows.bat         # Windows batch wrapper
+│   ├── install-desktop-launcher.sh # Linux .desktop shortcut helper
+│   ├── setup-systemd.sh            # Systemd service setup
+│   └── uninstall-linux.sh          # Clean Linux uninstaller
 │
-├── installer/                 # Optional Rust TUI installer crate
-├── resources/
-│   ├── desktop/               # .desktop entries
-│   └── systemd/               # systemd unit templates
-├── proto/                     # Shared protobuf definitions
-└── .github/workflows/         # CI + multi-platform release
+├── installer/                      # Interactive Rust terminal installer crate
+├── resources/                      # Desktop entries & systemd templates
+└── proto/                          # Shared protobuf definitions
 ```
 
 ---
 
-## Security Verification & Safety Guarantees
+## Verification & Safety Guarantees
 
-- **Privilege Separation**: The UI runs strictly under user privileges. Privileged operations are mediated across authenticated local IPC sockets.
-- **Safety Boundaries**: The active defense engine enforces hard limits: it will never target PID < 100, kernel worker threads, or critical system processes (`systemd`, `init`, `aegis-*`).
-- **Cryptographic Tamper-Evidence**: Incident logs and audit entries cannot be manipulated without invalidating the BLAKE3 hash chain.
-
----
-
-*Aegis-Guard — High-assurance endpoint security and network intrusion defense.*
+- **Protected Kernel & System PIDs**: Active defense refuses to target PID `< 100`, kernel worker threads, `systemd`/`init`, or `aegis-*` processes.
+- **Privilege Separation**: The web/desktop UI never runs with direct kernel privileges; operations pass through validated IPC endpoints and policy checks.
+- **Cryptographic Auditability**: Remediation actions append tamper-evident records linked to prior digests.

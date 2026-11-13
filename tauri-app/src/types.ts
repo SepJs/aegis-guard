@@ -102,6 +102,28 @@ export interface AnomalyDetail {
   mitre_technique?: string;
 }
 
+export interface SystemMetrics {
+  cpu_pct: number;
+  mem_total_mb: number;
+  mem_used_mb: number;
+  mem_available_mb: number;
+  mem_pct: number;
+  load_1m: number;
+  load_5m: number;
+  load_15m: number;
+  total_procs: number;
+  total_threads: number;
+  state_counts: {
+    running: number;
+    sleeping: number;
+    disk_wait: number;
+    zombie: number;
+    stopped: number;
+    idle: number;
+  };
+  ts: number;
+}
+
 export interface ProcessNode {
   id: string;
   pid: number;
@@ -109,6 +131,15 @@ export interface ProcessNode {
   uid: number;
   gid?: number;
   name: string;
+  state?: string;
+  state_label?: string;
+  cpu_pct?: number;
+  mem_rss_kb?: number;
+  mem_pct?: number;
+  threads?: number;
+  fd_count?: number;
+  io_read_bytes?: number;
+  io_write_bytes?: number;
   cmdline: string[];
   exe?: string | null;
   cwd?: string | null;
@@ -332,6 +363,21 @@ export interface NetworkConnection {
   threat_reason?: string;
 }
 
+export interface NetworkDevInterface {
+  iface: string;
+  rx_bytes: number;
+  rx_packets: number;
+  tx_bytes: number;
+  tx_packets: number;
+}
+
+export interface NetworkMetrics {
+  total_tx_bytes: number;
+  total_rx_bytes: number;
+  interfaces: NetworkDevInterface[];
+  arp?: Array<{ ip: string; hw_addr: string; device: string; flags: string }>;
+}
+
 export interface DnsQuery {
   id: string;
   domain: string;
@@ -455,4 +501,94 @@ export interface IocMatch {
   feed: string;
   confidence: number;
   context: string;
+}
+
+export interface SnmpCounters {
+  ip_in_receives: number;
+  ip_out_requests: number;
+  ip_in_hdr_errors: number;
+  tcp_active_opens: number;
+  tcp_passive_opens: number;
+  tcp_curr_estab: number;
+  tcp_in_segs: number;
+  tcp_out_segs: number;
+  tcp_retrans_segs: number;
+  tcp_attempt_fails: number;
+  udp_in_datagrams: number;
+  udp_out_datagrams: number;
+  udp_in_errors: number;
+  icmp_in_msgs: number;
+  icmp_out_msgs: number;
+  segments_per_sec: number;
+  retrans_rate_pct: number;
+}
+
+export interface PacketFlowFinding {
+  id: string;
+  category: string;
+  severity: string;
+  rule: string;
+  pid: number;
+  process: string;
+  protocol: string;
+  src_endpoint: string;
+  dst_endpoint: string;
+  state: string;
+  summary: string;
+  signature_hit: string;
+  action_taken: string;
+  ts_ms: number;
+}
+
+export interface PacketInspectorStats {
+  engine_source: string;
+  worker_threads: number;
+  packets_inspected: number;
+  flows_analyzed: number;
+  anomalies_found: number;
+  bytes_inspected: number;
+  active_syn_recv: number;
+  last_scan_ts_ms: number;
+}
+
+export interface PacketInspectorConfig {
+  deep_inspection: boolean;
+  syn_flood_guard: boolean;
+  port_scan_guard: boolean;
+  dns_tunnel_guard: boolean;
+  arp_spoof_guard: boolean;
+  syn_flood_threshold: number;
+  port_scan_threshold: number;
+}
+
+export interface PacketInspectionSnapshot {
+  engine_source: string;
+  go_bridge_connected: boolean;
+  snmp_counters: SnmpCounters;
+  stats: PacketInspectorStats;
+  config: PacketInspectorConfig;
+  flow_findings: PacketFlowFinding[];
+  arp_table: Array<{ ip: string; hw_addr: string; device: string; flags: string }>;
+}
+
+export interface SystemSettings {
+  process_inspection_enabled: boolean;
+  active_kill_enabled: boolean;
+  net_admin_enabled: boolean;
+  tamper_proof_audit: boolean;
+  auto_update_enabled: boolean;
+  realtime_av_enabled: boolean;
+}
+
+export interface RuntimeInfo {
+  app_version: string;
+  engine_version: string;
+  transport: string;
+  platform: string;
+  arch: string;
+  hostname: string;
+  data_dir: string;
+  quarantine_dir: string;
+  audit_hash_algo: string;
+  go_bridge_connected: boolean;
 }

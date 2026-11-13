@@ -111,7 +111,7 @@ export default function ForensicsPanel() {
   const handleTrustUserApp = async (id: string, path: string, name?: string) => {
     try {
       const res: any = await invoke("trust_user_app", { id, path, name });
-      setAvNotice(`✓ SAFEGUARD ENFORCED: ${res?.message || "Program whitelisted as trusted user software"}`);
+      setAvNotice(`SAFEGUARD ENFORCED: ${res?.message || "Program whitelisted as trusted user software"}`);
       loadAvData();
     } catch (err) {
       console.error("Error trusting user app:", err);
@@ -121,7 +121,7 @@ export default function ForensicsPanel() {
   const handleSendToSandbox = async (id: string) => {
     try {
       const res: any = await invoke("send_target_to_sandbox", { id });
-      setAvNotice(`🔬 SANDBOX CONTAINER ISOLATION: ${res?.message || "Target isolated in sandbox jail"}`);
+      setAvNotice(`SANDBOX ISOLATED: ${res?.message || "Target isolated in sandbox jail"}`);
       loadAvData();
     } catch (err) {
       console.error("Error isolating target in sandbox:", err);
@@ -131,7 +131,7 @@ export default function ForensicsPanel() {
   const handleConfirmMalware = async (id: string) => {
     try {
       const res: any = await invoke("confirm_malware_quarantine", { id });
-      setAvNotice(`⛔ THREAT QUARANTINED: ${res?.message || "Malware neutralized"}`);
+      setAvNotice(`THREAT QUARANTINED: ${res?.message || "Malware neutralized"}`);
       loadAvData();
     } catch (err) {
       console.error("Error confirming malware:", err);
@@ -177,8 +177,9 @@ export default function ForensicsPanel() {
       if (mode === "entropy") {
         runScan(file.name, uint8);
       } else {
-        // Run AV scan on file
-        scanTarget(file.name, new TextDecoder().decode(uint8.slice(0, 8192)));
+        // Send lossless raw binary bytes (up to 8MB) without UTF-8 decoder corruption
+        const slice = uint8.slice(0, Math.min(uint8.length, 8 * 1024 * 1024));
+        scanTarget(file.name, Array.from(slice));
       }
     } catch {
       if (mode === "entropy") {
@@ -190,21 +191,21 @@ export default function ForensicsPanel() {
   }
 
   // Run AV Scan on target path or custom content
-  const scanTarget = async (path: string, content?: string) => {
+  const scanTarget = async (target: string, content?: string | number[]) => {
     setAvScanning(true);
     setAvNotice(null);
     try {
       const res = await invoke<MalwareScanResult>("scan_malware_target", {
-        path: path.trim() || "/tmp/unknown_binary",
-        content: content || targetContent,
+        path: target.trim() || "/tmp/unknown_binary",
+        content: content !== undefined ? content : targetContent,
       });
       if (res) {
         setAvNotice(
           res.status === "infected"
-            ? `⚡ ALERT: Infected with ${res.malware_name || "Malware"} (${res.family || "Unknown"}) - Rule: ${res.rule_matched}`
+            ? `ALERT: Infected with ${res.malware_name || "Malware"} (${res.family || "Unknown"}) — Rule ${res.rule_matched}`
             : res.status === "suspicious"
-            ? `⚠ SUSPICIOUS: Anomaly flagged by ${res.rule_matched}`
-            : `✓ CLEAN: No virus signature or malware heuristics detected in ${res.target_path}`
+            ? `SUSPICIOUS: Anomaly flagged by ${res.rule_matched}`
+            : `CLEAN: ${res.rule_matched || `No virus signature detected in ${res.target_path}`}`
         );
         loadAvData();
       }
@@ -215,22 +216,60 @@ export default function ForensicsPanel() {
     }
   };
 
-  // Run Test Sample
-  const runTestSample = async (sampleType: string) => {
+  // Recursive directory malware scan
+  const scanDirectory = async (dirPath: string) => {
+    const cleanDir = dirPath.trim() || "/tmp/aegis_guard_data";
     setAvScanning(true);
     setAvNotice(null);
     try {
-      const res = await invoke<MalwareScanResult>("test_malware_sample", { sample_type: sampleType });
+      const res = await invoke<{
+        directory: string;
+        files_scanned: number;
+        infected_count: number;
+        suspicious_count: number;
+        clean_count: number;
+        duration_ms: number;
+      }>("scan_directory_malware", { path: cleanDir });
       if (res) {
         setAvNotice(
-          res.status === "infected"
-            ? `⚡ TEST DETECTED: ${res.malware_name} [${res.family}] - Rule: ${res.rule_matched} (${res.detection_method})`
-            : `✓ TEST BENIGN: Clean system binary correctly verified without false positives`
+          res.infected_count > 0
+            ? `ALERT: Directory scan (${res.directory}) found ${res.infected_count} infected, ${res.suspicious_count} suspicious across ${res.files_scanned} files (${res.duration_ms}ms)`
+            : res.suspicious_count > 0
+            ? `SUSPICIOUS: Directory scan (${res.directory}) flagged ${res.suspicious_count} files across ${res.files_scanned} files (${res.duration_ms}ms)`
+            : `CLEAN: Scanned ${res.files_scanned} files in ${res.directory} (${res.clean_count} verified clean in ${res.duration_ms}ms)`
         );
         loadAvData();
       }
-    } catch (err) {
-      console.error("Test sample failed:", err);
+    } catch (err: any) {
+      setAvNotice(`Directory scan error: ${err?.message || String(err)}`);
+    } finally {
+      setAvScanning(false);
+    }
+  };
+
+  // Quick system-wide AV scan (/proc executables + volatile host paths)
+  const runQuickSystemAvScan = async () => {
+    setAvScanning(true);
+    setAvNotice(null);
+    try {
+      const res = await invoke<{
+        procs_scanned: number;
+        files_scanned: number;
+        infected_count: number;
+        suspicious_count: number;
+        clean_count: number;
+        duration_ms: number;
+      }>("quick_system_av_scan");
+      if (res) {
+        setAvNotice(
+          res.infected_count > 0 || res.suspicious_count > 0
+            ? `ALERT: System AV Sweep inspected ${res.procs_scanned} live processes + ${res.files_scanned} volatile files (${res.infected_count} infected, ${res.suspicious_count} suspicious) in ${res.duration_ms}ms`
+            : `CLEAN: System AV Sweep verified ${res.procs_scanned} live processes + ${res.files_scanned} volatile files (${res.duration_ms}ms)`
+        );
+        loadAvData();
+      }
+    } catch (err: any) {
+      setAvNotice(`System AV scan failed: ${err?.message || String(err)}`);
     } finally {
       setAvScanning(false);
     }
@@ -241,7 +280,7 @@ export default function ForensicsPanel() {
     try {
       const res = await invoke<any>("quarantine_malware", { id, action });
       if (res?.message) {
-        setAvNotice(`◈ ${res.message}`);
+        setAvNotice(res.message);
         loadAvData();
       }
     } catch (err) {
@@ -253,7 +292,7 @@ export default function ForensicsPanel() {
     try {
       const current = avStats?.auto_remediation_enabled ?? true;
       await invoke("set_auto_remediation", { enabled: !current });
-      setAvNotice(`◈ Automated Malware Neutralization Engine ${!current ? "ARMED (Destroys Takeover Threats Automatically)" : "DISARMED (Manual Action Required)"}`);
+      setAvNotice(`Automated Malware Neutralization Engine ${!current ? "ARMED (Quarantines confirmed threats)" : "DISARMED (Manual Action Required)"}`);
       loadAvData();
     } catch (err) {
       console.error("Failed to toggle auto remediation:", err);
@@ -285,14 +324,14 @@ export default function ForensicsPanel() {
             onClick={() => setMode("antivirus")}
             style={{ fontWeight: 700 }}
           >
-            ⚡ ANTIVIRUS & MALWARE DETECTOR
+            ANTIVIRUS &amp; MALWARE DETECTOR
           </button>
           <button
             className={`sm-btn ${mode === "entropy" ? "sm-btn--active" : ""}`}
             onClick={() => setMode("entropy")}
             style={{ fontWeight: 700 }}
           >
-            ⊕ SHANNON ENTROPY INSPECTOR
+            SHANNON ENTROPY INSPECTOR
           </button>
         </div>
 
@@ -303,7 +342,7 @@ export default function ForensicsPanel() {
             </span>
             <span className="pstat">{signatures.length} SIGNATURES</span>
             {avStats.threats_blocked > 0 && (
-              <span className="pstat pstat--warn">⚠ {avStats.threats_blocked} BLOCKED</span>
+              <span className="pstat pstat--warn">{avStats.threats_blocked} BLOCKED</span>
             )}
             {avStats.quarantined_files > 0 && (
               <span className="pstat" style={{ color: "var(--amberl)", borderColor: "var(--amber)" }}>
@@ -320,9 +359,9 @@ export default function ForensicsPanel() {
                 fontWeight: 700,
                 fontSize: 10,
               }}
-              title="Automatically neutralizes critical threats and takeover malware"
+              title="Automatically quarantines critical threats and takeover malware"
             >
-              {avStats.auto_remediation_enabled ? "⚡ AUTO-DESTROY [ARMED]" : "⚠ AUTO-DESTROY [OFF]"}
+              {avStats.auto_remediation_enabled ? "AUTO-QUARANTINE: ARMED" : "AUTO-QUARANTINE: OFF"}
             </button>
           </>
         )}
@@ -330,12 +369,22 @@ export default function ForensicsPanel() {
         {mode === "entropy" && summary && (
           <>
             <span className="pstat">{summary.scanned_files} SCANNED</span>
-            {summary.high_risk > 0 && <span className="pstat pstat--warn">⚠ {summary.high_risk} HIGH-RISK</span>}
+            {summary.high_risk > 0 && <span className="pstat pstat--warn">{summary.high_risk} HIGH-RISK</span>}
             <span className="scan-time">{summary.elapsed_ms}ms</span>
           </>
         )}
 
         <div className="toolbar-right">
+          {mode === "antivirus" && (
+            <button
+              className="btn-primary"
+              onClick={runQuickSystemAvScan}
+              disabled={avScanning}
+              title="Inspect all live /proc process binaries and volatile directories (/dev/shm, /var/tmp)"
+            >
+              {avScanning ? "SCANNING HOST…" : "QUICK SYSTEM AV SCAN"}
+            </button>
+          )}
           {mode === "entropy" && summary && (
             <>
               <select className="filter-select" value={filter} onChange={(e) => setFilter(e.target.value)}>
@@ -375,23 +424,23 @@ export default function ForensicsPanel() {
         <div
           style={{
             padding: "8px 14px",
-            background: avNotice.includes("ALERT") || avNotice.includes("TEST DETECTED")
+            background: avNotice.includes("ALERT") || avNotice.includes("failed") || avNotice.includes("error")
               ? "rgba(220,38,38,.12)"
               : "rgba(13,148,136,.12)",
             borderBottom: "1px solid var(--border)",
-            color: avNotice.includes("ALERT") || avNotice.includes("TEST DETECTED")
+            color: avNotice.includes("ALERT") || avNotice.includes("failed") || avNotice.includes("error")
               ? "var(--redl)"
               : "var(--teall)",
-            fontSize: 10,
+            fontSize: 11,
             fontWeight: 600,
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
           }}
         >
-          <span>◈ {avNotice}</span>
+          <span>{avNotice}</span>
           <button onClick={() => setAvNotice(null)} style={{ color: "var(--tx2)", fontSize: 11, cursor: "pointer" }}>
-            ✕
+            ×
           </button>
         </div>
       )}
@@ -399,7 +448,7 @@ export default function ForensicsPanel() {
       {/* MODE 1: ANTIVIRUS & MALWARE DETECTOR */}
       {mode === "antivirus" && (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          {/* Action & Simulation Bar */}
+          {/* Real File & Payload Scanner Bar */}
           <div
             style={{
               padding: "10px 14px",
@@ -411,146 +460,26 @@ export default function ForensicsPanel() {
             }}
           >
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <span style={{ fontSize: 9, color: "var(--tx2)", letterSpacing: "0.08em", fontWeight: 700 }}>
-                ONE-CLICK MALWARE SAMPLE VERIFICATION:
+              <span style={{ fontSize: 10, color: "var(--tx2)", letterSpacing: "0.08em", fontWeight: 700 }}>
+                HOST FILE &amp; PAYLOAD BYTE SCANNER
               </span>
-              <span style={{ fontSize: 9, color: "var(--tx2)" }}>
-                Tests rule assignment accuracy without issuing heavy false positives on benign code.
+              <span style={{ fontSize: 10, color: "var(--tx2)" }}>
+                Scans files on disk, live processes, or uploaded binaries via SHA-256 and byte-signature inspection.
               </span>
             </div>
 
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-              <button
-                className="sm-btn"
-                onClick={() => runTestSample("eicar")}
-                disabled={avScanning}
-                title="Standard Anti-Virus Test Pattern"
-                style={{ borderColor: "rgba(220,38,38,.4)", color: "var(--redl)" }}
-              >
-                ⚡ EICAR Test
-              </button>
-              <button
-                className="sm-btn"
-                onClick={() => runTestSample("xmrig")}
-                disabled={avScanning}
-                title="Cryptojacking Miner Signature & Stratum Protocol"
-                style={{ borderColor: "rgba(220,38,38,.4)", color: "var(--redl)" }}
-              >
-                ⚡ XMRig Miner
-              </button>
-              <button
-                className="sm-btn"
-                onClick={() => runTestSample("deadbolt")}
-                disabled={avScanning}
-                title="Linux DeadBolt Ransomware"
-                style={{ borderColor: "rgba(220,38,38,.4)", color: "var(--redl)" }}
-              >
-                ⚡ DeadBolt Ransomware
-              </button>
-              <button
-                className="sm-btn"
-                onClick={() => runTestSample("lockbit")}
-                disabled={avScanning}
-                title="LockBit ESXi Hypervisor Ransomware"
-                style={{ borderColor: "rgba(220,38,38,.4)", color: "var(--redl)" }}
-              >
-                ⚡ LockBit ESXi
-              </button>
-              <button
-                className="sm-btn"
-                onClick={() => runTestSample("diamorphine")}
-                disabled={avScanning}
-                title="Diamorphine LKM Kernel Rootkit"
-                style={{ borderColor: "rgba(220,38,38,.4)", color: "var(--redl)" }}
-              >
-                ⚡ Diamorphine Rootkit
-              </button>
-              <button
-                className="sm-btn"
-                onClick={() => runTestSample("bpfdoor")}
-                disabled={avScanning}
-                title="BPFDoor Stealth Raw Socket Backdoor"
-                style={{ borderColor: "rgba(220,38,38,.4)", color: "var(--redl)" }}
-              >
-                ⚡ BPFDoor Backdoor
-              </button>
-              <button
-                className="sm-btn"
-                onClick={() => runTestSample("webshell")}
-                disabled={avScanning}
-                title="PHP WebShell Backdoor with eval(base64_decode)"
-                style={{ borderColor: "rgba(220,38,38,.4)", color: "var(--redl)" }}
-              >
-                ⚡ C99 WebShell
-              </button>
-              <button
-                className="sm-btn"
-                onClick={() => runTestSample("chinachopper")}
-                disabled={avScanning}
-                title="One-line ChinaChopper WebShell eval($_POST)"
-                style={{ borderColor: "rgba(220,38,38,.4)", color: "var(--redl)" }}
-              >
-                ⚡ ChinaChopper
-              </button>
-              <button
-                className="sm-btn"
-                onClick={() => runTestSample("mirai")}
-                disabled={avScanning}
-                title="Mirai IoT / Linux Botnet Scanner"
-                style={{ borderColor: "rgba(220,38,38,.4)", color: "var(--redl)" }}
-              >
-                ⚡ Mirai Botnet
-              </button>
-              <button
-                className="sm-btn"
-                onClick={() => runTestSample("teamtnt")}
-                disabled={avScanning}
-                title="TeamTNT AWS/SSH Credential Harvester"
-                style={{ borderColor: "rgba(220,38,38,.4)", color: "var(--redl)" }}
-              >
-                ⚡ TeamTNT InfoStealer
-              </button>
-              <button
-                className="sm-btn"
-                onClick={() => runTestSample("pwnkit")}
-                disabled={avScanning}
-                title="PwnKit CVE-2021-4034 Local Privilege Escalation Exploit"
-                style={{ borderColor: "rgba(220,38,38,.4)", color: "var(--redl)" }}
-              >
-                ⚡ PwnKit Exploit
-              </button>
-              <button
-                className="sm-btn"
-                onClick={() => runTestSample("c2_beacon")}
-                disabled={avScanning}
-                title="Cobalt Strike Memory Injected C2 Beacon"
-                style={{ borderColor: "rgba(220,38,38,.4)", color: "var(--redl)" }}
-              >
-                ⚡ Cobalt Strike C2
-              </button>
-              <button
-                className="sm-btn"
-                onClick={() => runTestSample("benign")}
-                disabled={avScanning}
-                title="Verify standard /bin/bash is clean with NO false alerts"
-                style={{ borderColor: "var(--teal)", color: "var(--teall)" }}
-              >
-                ✓ Benign Binary (/bin/bash)
-              </button>
-            </div>
-
-            {/* Custom Target / Script Scanner */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 8, marginTop: 4 }}>
+            {/* Custom Target / Script / Directory Scanner */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto auto", gap: 8, marginTop: 4 }}>
               <input
                 className="challenge-input"
-                style={{ fontSize: 10, padding: "5px 8px" }}
+                style={{ fontSize: 11, padding: "5px 8px" }}
                 value={targetPath}
                 onChange={(e) => setTargetPath(e.target.value)}
-                placeholder="Target File Path (e.g. /dev/shm/.kworker, /tmp/script.sh)..."
+                placeholder="File or directory path (e.g. /tmp/aegis_guard_data, /bin/sh)..."
               />
               <input
                 className="challenge-input"
-                style={{ fontSize: 10, padding: "5px 8px" }}
+                style={{ fontSize: 11, padding: "5px 8px" }}
                 value={targetContent}
                 onChange={(e) => setTargetContent(e.target.value)}
                 placeholder="Payload string / command to inspect (or paste script snippet)..."
@@ -561,7 +490,16 @@ export default function ForensicsPanel() {
                 disabled={avScanning || (!targetPath && !targetContent)}
                 style={{ height: 28, padding: "0 14px" }}
               >
-                {avScanning ? "SCANNING…" : "SCAN TARGET"}
+                {avScanning ? "SCANNING…" : "SCAN FILE"}
+              </button>
+              <button
+                className="sm-btn sm-btn--active"
+                onClick={() => scanDirectory(targetPath || "/tmp/aegis_guard_data")}
+                disabled={avScanning}
+                style={{ height: 28, padding: "0 12px", fontWeight: 700 }}
+                title="Recursively scan all files inside the specified directory"
+              >
+                SCAN DIR
               </button>
             </div>
           </div>
@@ -597,7 +535,7 @@ export default function ForensicsPanel() {
                     onClick={() => setAvSubTab("whitelist")}
                     style={{ fontSize: 9, color: "var(--teall)", borderColor: avSubTab === "whitelist" ? "var(--teal)" : undefined }}
                   >
-                    🛡️ USER APPS SAFEGUARD ({whitelistedApps.length})
+                    USER APPS SAFEGUARD ({whitelistedApps.length})
                   </button>
                 </div>
                 <button className="sm-btn" onClick={loadAvData} style={{ fontSize: 8 }}>
@@ -609,7 +547,7 @@ export default function ForensicsPanel() {
                 <div style={{ flex: 1, overflowY: "auto", padding: 12 }}>
                   <div style={{ marginBottom: 12, padding: "8px 12px", background: "rgba(13,148,136,0.08)", border: "1px solid rgba(13,148,136,0.3)", borderRadius: 4 }}>
                     <div style={{ fontSize: 11, fontWeight: 700, color: "var(--teall)", marginBottom: 4 }}>
-                      🛡️ User Application Safeguard Protection
+                      User Application Safeguard Protection
                     </div>
                     <div style={{ fontSize: 10, color: "var(--tx1)", lineHeight: 1.4 }}>
                       All binaries, scripts, and dev tools registered here are shielded from automated deletion. The heuristic antivirus will never quarantine or purge them without explicit administrator consent.
@@ -618,10 +556,9 @@ export default function ForensicsPanel() {
 
                   {whitelistedApps.length === 0 ? (
                     <div className="empty-state">
-                      <span className="empty-icon">🛡️</span>
                       <span>NO PROGRAMS IN SAFEGUARD LIST</span>
-                      <span style={{ fontSize: 9 }}>
-                        When a program triggers heuristic suspicion, mark it as your trusted app to protect it here.
+                      <span style={{ fontSize: 10 }}>
+                        When a program triggers heuristic suspicion, mark it as trusted software to protect it here.
                       </span>
                     </div>
                   ) : (
@@ -648,10 +585,10 @@ export default function ForensicsPanel() {
                               PROTECTED
                             </span>
                           </div>
-                          <div style={{ fontSize: 9, color: "var(--tx2)", fontFamily: "monospace" }}>{uapp.path}</div>
-                          {uapp.note && <div style={{ fontSize: 9, color: "var(--tx1)" }}>{uapp.note}</div>}
+                          <div style={{ fontSize: 10, color: "var(--tx2)", fontFamily: "var(--mono)" }}>{uapp.path}</div>
+                          {uapp.note && <div style={{ fontSize: 10, color: "var(--tx1)" }}>{uapp.note}</div>}
                           {uapp.sha256 && (
-                            <div style={{ fontSize: 8, color: "var(--tx2)", fontFamily: "monospace" }}>SHA256: {uapp.sha256.slice(0, 24)}...</div>
+                            <div style={{ fontSize: 9, color: "var(--tx2)", fontFamily: "var(--mono)" }}>SHA-256: {uapp.sha256.slice(0, 24)}...</div>
                           )}
                         </div>
                         <button
@@ -659,7 +596,7 @@ export default function ForensicsPanel() {
                           onClick={() => handleRemoveWhitelist(uapp.path)}
                           style={{ borderColor: "var(--red)", color: "var(--redl)", fontSize: 9 }}
                         >
-                          ✕ Remove Protection
+                          Remove Protection
                         </button>
                       </div>
                     ))
@@ -669,10 +606,9 @@ export default function ForensicsPanel() {
                 <div style={{ flex: 1, overflowY: "auto" }}>
                   {malwareResults.length === 0 ? (
                     <div className="empty-state">
-                      <span className="empty-icon">🛡</span>
                       <span>NO MALWARE SCANS CONDUCTED YET</span>
-                      <span style={{ fontSize: 9 }}>
-                        Use the test buttons or enter a target path above to run heuristic antivirus scans.
+                      <span style={{ fontSize: 10 }}>
+                        Run Quick System AV Scan or enter a file/directory path above to inspect host artifacts.
                       </span>
                     </div>
                   ) : (
@@ -737,13 +673,13 @@ export default function ForensicsPanel() {
 
                             {mr.user_verdict === "trusted_user_app" && (
                               <span style={{ fontSize: 8, color: "var(--teall)", fontWeight: 700 }}>
-                                ✓ SAFEGUARDED
+                                SAFEGUARDED
                               </span>
                             )}
 
                             {mr.sandbox_jail_id && (
                               <span style={{ fontSize: 8, color: "var(--purplel)", fontWeight: 700 }}>
-                                🔬 ISOLATED
+                                ISOLATED
                               </span>
                             )}
 
@@ -763,7 +699,7 @@ export default function ForensicsPanel() {
 
                             {mr.quarantined ? (
                               <span style={{ fontSize: 8, color: "var(--amberl)", fontWeight: 700 }}>
-                                ⊘ QUARANTINED
+                                QUARANTINED
                               </span>
                             ) : mr.status === "infected" ? (
                               <button
@@ -784,11 +720,11 @@ export default function ForensicsPanel() {
                           {/* Suspicious User Program Triage Prompt */}
                           {mr.status === "suspicious" && (
                             <div style={{ margin: "4px 12px 8px", padding: "8px 10px", background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 4 }}>
-                              <div style={{ fontSize: 10, fontWeight: 700, color: "var(--amberl)", display: "flex", alignItems: "center", gap: 5 }}>
-                                <span>⚠️</span> SUSPICIOUS SOFTWARE TRIAGE:
+                              <div style={{ fontSize: 10, fontWeight: 700, color: "var(--amberl)" }}>
+                                SUSPICIOUS SOFTWARE TRIAGE
                               </div>
-                              <div style={{ fontSize: 9, color: "var(--tx1)", margin: "4px 0 6px", lineHeight: 1.4 }}>
-                                This binary or script triggered heuristic detection patterns. To prevent accidental disruption to your own software, choose an action below:
+                              <div style={{ fontSize: 10, color: "var(--tx1)", margin: "4px 0 6px", lineHeight: 1.4 }}>
+                                This binary or script triggered heuristic detection patterns. Select an action to handle it safely:
                               </div>
                               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                                 <button
@@ -799,7 +735,7 @@ export default function ForensicsPanel() {
                                   }}
                                   style={{ borderColor: "var(--teal)", color: "var(--teall)", fontSize: 9, fontWeight: 700 }}
                                 >
-                                  🛡️ Trust & Safeguard (Whitelist)
+                                  Trust &amp; Safeguard (Whitelist)
                                 </button>
                                 <button
                                   className="sm-btn"
@@ -809,7 +745,7 @@ export default function ForensicsPanel() {
                                   }}
                                   style={{ borderColor: "var(--purple)", color: "var(--purplel)", fontSize: 9, fontWeight: 700 }}
                                 >
-                                  🔬 Isolate in Sandbox
+                                  Isolate in Sandbox
                                 </button>
                                 <button
                                   className="sm-btn"
@@ -819,7 +755,7 @@ export default function ForensicsPanel() {
                                   }}
                                   style={{ borderColor: "var(--red)", color: "var(--redl)", fontSize: 9, fontWeight: 700 }}
                                 >
-                                  ⛔ Confirm Threat & Quarantine
+                                  Confirm Threat &amp; Quarantine
                                 </button>
                               </div>
                             </div>
@@ -828,12 +764,13 @@ export default function ForensicsPanel() {
                           {isExpanded && (
                             <div
                               style={{
-                                padding: "6px 14px 10px",
-                                background: "rgba(7,7,10,.6)",
+                                padding: "8px 14px 10px",
+                                background: "var(--bg0)",
+                                borderTop: "1px solid var(--border-dim)",
                                 display: "flex",
                                 flexDirection: "column",
                                 gap: 4,
-                                fontSize: 9,
+                                fontSize: 10,
                               }}
                             >
                               <div className="meta-row">
@@ -862,7 +799,7 @@ export default function ForensicsPanel() {
                               )}
                               {mr.indicators && mr.indicators.length > 0 && (
                                 <div style={{ marginTop: 3 }}>
-                                  <span style={{ color: "var(--tx2)", fontSize: 8, fontWeight: 700 }}>
+                                  <span style={{ color: "var(--tx2)", fontSize: 9, fontWeight: 700 }}>
                                     MATCHED INDICATORS:
                                   </span>
                                   <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 2 }}>
@@ -870,7 +807,7 @@ export default function ForensicsPanel() {
                                       <span
                                         key={iidx}
                                         style={{
-                                          fontSize: 8,
+                                          fontSize: 9,
                                           fontFamily: "var(--mono)",
                                           padding: "1px 5px",
                                           borderRadius: 2,
@@ -891,42 +828,42 @@ export default function ForensicsPanel() {
                                   <button
                                     className="sm-btn"
                                     onClick={() => handleQuarantineAction(mr.id, "restore")}
-                                    style={{ borderColor: "var(--teal)", color: "var(--teall)", fontSize: 8 }}
+                                    style={{ borderColor: "var(--teal)", color: "var(--teall)", fontSize: 9 }}
                                   >
-                                    ✓ RESTORE FROM QUARANTINE
+                                    RESTORE FROM QUARANTINE
                                   </button>
                                 ) : (
                                   <button
                                     className="sm-btn"
                                     onClick={() => handleQuarantineAction(mr.id, "quarantine")}
-                                    style={{ borderColor: "var(--amber)", color: "var(--amberl)", fontSize: 8 }}
+                                    style={{ borderColor: "var(--amber)", color: "var(--amberl)", fontSize: 9 }}
                                   >
-                                    ⊘ MOVE TO QUARANTINE
+                                    MOVE TO QUARANTINE
                                   </button>
                                 )}
 
                                 <button
                                   className="sm-btn"
                                   onClick={() => handleTrustUserApp(mr.id, mr.target_path, mr.malware_name)}
-                                  style={{ borderColor: "var(--teal)", color: "var(--teall)", fontSize: 8 }}
+                                  style={{ borderColor: "var(--teal)", color: "var(--teall)", fontSize: 9 }}
                                 >
-                                  🛡️ SAFEGUARD USER APP
+                                  SAFEGUARD USER APP
                                 </button>
 
                                 <button
                                   className="sm-btn"
                                   onClick={() => handleSendToSandbox(mr.id)}
-                                  style={{ borderColor: "var(--purple)", color: "var(--purplel)", fontSize: 8 }}
+                                  style={{ borderColor: "var(--purple)", color: "var(--purplel)", fontSize: 9 }}
                                 >
-                                  🔬 RUN IN ISOLATED SANDBOX
+                                  ISOLATE IN SANDBOX
                                 </button>
 
                                 <button
                                   className="sm-btn"
                                   onClick={() => handleQuarantineAction(mr.id, "delete")}
-                                  style={{ borderColor: "var(--red)", color: "var(--redl)", fontSize: 8 }}
+                                  style={{ borderColor: "var(--red)", color: "var(--redl)", fontSize: 9 }}
                                 >
-                                  ✕ DELETE FORENSIC RECORD
+                                  DELETE RECORD
                                 </button>
                               </div>
                             </div>
@@ -963,12 +900,17 @@ export default function ForensicsPanel() {
                   style={{ fontSize: 8 }}
                 >
                   <option value="all">ALL FAMILIES</option>
-                  <option value="Trojan">TROJAN</option>
+                  <option value="TestSample">TEST SAMPLE</option>
+                  <option value="Packer">PACKER</option>
                   <option value="CoinMiner">COINMINER</option>
                   <option value="WebShell">WEBSHELL</option>
                   <option value="Ransomware">RANSOMWARE</option>
+                  <option value="Rootkit">ROOTKIT</option>
                   <option value="Backdoor">BACKDOOR</option>
-                  <option value="TestPattern">TEST PATTERN</option>
+                  <option value="Botnet">BOTNET</option>
+                  <option value="InfoStealer">INFOSTEALER</option>
+                  <option value="Exploit">EXPLOIT</option>
+                  <option value="Trojan">TROJAN</option>
                 </select>
               </div>
 
@@ -1079,17 +1021,17 @@ export default function ForensicsPanel() {
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                   <button
                     className="sm-btn"
-                    style={{ borderColor: "var(--red)", color: "var(--redl)" }}
-                    onClick={() => runScan("/dev/shm/.kworker")}
+                    style={{ borderColor: "var(--purple)", color: "var(--vl)" }}
+                    onClick={() => runScan("/app/applet")}
                   >
-                    ⚠ Scan Suspicious Dropper (/dev/shm/.kworker)
+                    ⊕ Scan Workspace (/app/applet)
                   </button>
                   <button
                     className="sm-btn"
                     style={{ borderColor: "var(--teal)", color: "var(--teall)" }}
-                    onClick={() => runScan("/etc/nginx/nginx.conf")}
+                    onClick={() => runScan("/etc/os-release")}
                   >
-                    ✓ Scan Clean Config (/etc/nginx/nginx.conf)
+                    ✓ Scan System Config (/etc/os-release)
                   </button>
                   <div style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
                     <input

@@ -19,6 +19,8 @@ sudo systemctl daemon-reload
 
 sudo rm -f /usr/local/bin/aegis-process-engine
 sudo rm -f /usr/local/bin/aegis-network-observer
+sudo rm -f /usr/local/bin/aegis-guard
+sudo rm -f /usr/local/bin/aegis-guard-desktop
 sudo rm -f /usr/local/bin/aegis-guard-dashboard
 sudo rm -f /usr/local/bin/aegis-guard-launch
 sudo rm -f /etc/tmpfiles.d/aegis-guard.conf

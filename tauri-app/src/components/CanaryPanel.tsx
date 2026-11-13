@@ -55,7 +55,7 @@ export default function CanaryPanel() {
                   }}
                   title="Simulate unauthorized exfiltration of this honeypot token"
                 >
-                  ⚡ TEST TRIP
+                  TEST TRIP
                 </button>
               )}
               <button className="sm-btn" style={{ fontSize: 9 }} onClick={() => remove(t.id)}>REMOVE</button>

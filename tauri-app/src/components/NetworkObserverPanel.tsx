@@ -1,12 +1,30 @@
 import { useState, useEffect } from "react";
 import { invoke } from "../lib/ipc/core";
 import { listen } from "../lib/ipc/event";
-import type { NetworkConnection, DnsQuery, NetworkAttackEvent, NetworkDefenseConfig } from "../types";
+import { useProcessStore } from "../store/processStore";
+import type {
+  NetworkConnection,
+  DnsQuery,
+  NetworkAttackEvent,
+  NetworkDefenseConfig,
+  NetworkMetrics,
+  PacketInspectionSnapshot,
+  PacketInspectorConfig,
+} from "../types";
+
+function fmtNetBytes(b: number): string {
+  if (b >= 1024 * 1024 * 1024) return `${(b / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  if (b >= 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(2)} MB`;
+  if (b >= 1024) return `${(b / 1024).toFixed(1)} KB`;
+  return `${b} B`;
+}
 
 export default function NetworkObserverPanel() {
+  const { store, dispatch } = useProcessStore();
   const [connections, setConnections] = useState<NetworkConnection[]>([]);
   const [dnsQueries, setDnsQueries] = useState<DnsQuery[]>([]);
   const [attacks, setAttacks] = useState<NetworkAttackEvent[]>([]);
+  const [netMetrics, setNetMetrics] = useState<NetworkMetrics | null>(store.netMetrics);
   const [config, setConfig] = useState<NetworkDefenseConfig>({
     ids_enabled: true,
     auto_drop_attackers: true,
@@ -18,21 +36,30 @@ export default function NetworkObserverPanel() {
 
   const [search, setSearch] = useState("");
   const [threatOnly, setThreatOnly] = useState(false);
-  const [subTab, setSubTab] = useState<"connections" | "attacks" | "dns" | "config">("connections");
-  const [simulating, setSimulating] = useState(false);
+  const [subTab, setSubTab] = useState<"connections" | "packet" | "attacks" | "dns" | "config">("connections");
+  const [packetSnapshot, setPacketSnapshot] = useState<PacketInspectionSnapshot | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [manualIp, setManualIp] = useState("");
 
   async function loadData() {
     try {
-      const conns = await invoke<NetworkConnection[]>("list_network_connections");
-      const dns = await invoke<DnsQuery[]>("list_dns_queries");
-      const atks = await invoke<NetworkAttackEvent[]>("list_network_attacks");
-      const cfg = await invoke<NetworkDefenseConfig>("get_network_defense_config");
+      const [conns, dns, atks, cfg, metrics, pkt] = await Promise.all([
+        invoke<NetworkConnection[]>("list_network_connections"),
+        invoke<DnsQuery[]>("list_dns_queries"),
+        invoke<NetworkAttackEvent[]>("list_network_attacks"),
+        invoke<NetworkDefenseConfig>("get_network_defense_config"),
+        invoke<NetworkMetrics>("get_network_metrics"),
+        invoke<PacketInspectionSnapshot>("get_packet_inspection"),
+      ]);
       if (conns) setConnections(conns);
       if (dns) setDnsQueries(dns);
       if (atks) setAttacks(atks);
       if (cfg) setConfig(cfg);
+      if (pkt) setPacketSnapshot(pkt);
+      if (metrics) {
+        setNetMetrics(metrics);
+        dispatch({ type: "SET_NET_METRICS", payload: metrics });
+      }
     } catch (err) {
       console.error("Failed to load network data:", err);
     }
@@ -41,22 +68,32 @@ export default function NetworkObserverPanel() {
   useEffect(() => {
     loadData();
 
-    // Listen for live network updates from observer engine
-    const unsubNet = listen<{ connections: NetworkConnection[] }>("net-update", (ev) => {
+    // Listen for live network updates from /proc/net & Go Packet Inspector engine
+    const unsubNet = listen<{ connections: NetworkConnection[]; netDev?: NetworkMetrics }>("net-update", (ev) => {
       if (ev.payload?.connections) {
         setConnections([...ev.payload.connections]);
+      }
+      if (ev.payload?.netDev) {
+        setNetMetrics(ev.payload.netDev);
+      }
+    });
+
+    const unsubPkt = listen<PacketInspectionSnapshot>("packet-inspection", (ev) => {
+      if (ev.payload) {
+        setPacketSnapshot(ev.payload);
       }
     });
 
     const unsubAtk = listen<NetworkAttackEvent>("net-attack", (ev) => {
       if (ev.payload) {
         setAttacks((prev) => [ev.payload, ...prev]);
-        setStatusMsg(`🚨 INCOMING THREAT DETECTED & CONTAINED: ${ev.payload.attack_type} from ${ev.payload.source_ip}`);
+        setStatusMsg(`SOCKET/ARP ANOMALY DETECTED: ${ev.payload.attack_type} (${ev.payload.source_ip})`);
       }
     });
 
     return () => {
       unsubNet.then((f) => f && f());
+      unsubPkt.then((f) => f && f());
       unsubAtk.then((f) => f && f());
     };
   }, []);
@@ -84,20 +121,6 @@ export default function NetworkObserverPanel() {
     }
   }
 
-  async function handleSimulateAttack(type: NetworkAttackEvent["attack_type"]) {
-    setSimulating(true);
-    try {
-      const res: any = await invoke("simulate_network_attack", { attack_type: type });
-      setStatusMsg(`Attack '${type}' simulated from ${res.source_ip}. Defense applied: ${res.defense_action}`);
-      setTimeout(() => setStatusMsg(null), 5000);
-      loadData();
-    } catch (err: any) {
-      console.error("Simulation error:", err);
-    } finally {
-      setSimulating(false);
-    }
-  }
-
   async function toggleConfigOption(key: keyof NetworkDefenseConfig) {
     if (typeof config[key] !== "boolean") return;
     const newConfig = {
@@ -111,6 +134,22 @@ export default function NetworkObserverPanel() {
       setTimeout(() => setStatusMsg(null), 3000);
     } catch (err) {
       console.error("Config update error:", err);
+    }
+  }
+
+  async function togglePacketInspectorOption(key: keyof PacketInspectorConfig) {
+    if (!packetSnapshot || typeof packetSnapshot.config[key] !== "boolean") return;
+    const nextCfg: PacketInspectorConfig = {
+      ...packetSnapshot.config,
+      [key]: !packetSnapshot.config[key],
+    };
+    try {
+      const updated = await invoke<PacketInspectorConfig>("set_packet_inspector_config", { config: nextCfg });
+      setPacketSnapshot((prev) => (prev ? { ...prev, config: updated || nextCfg } : prev));
+      setStatusMsg(`Packet inspector policy updated (${key}).`);
+      setTimeout(() => setStatusMsg(null), 3000);
+    } catch (err) {
+      console.error("Packet inspector config error:", err);
     }
   }
 
@@ -131,8 +170,8 @@ export default function NetworkObserverPanel() {
 
   const suspiciousCount = connections.filter((c) => c.threat !== "safe").length;
   const establishedCount = connections.filter((c) => c.state === "ESTABLISHED").length;
-  const totalTx = connections.reduce((acc, c) => acc + c.bytes_tx, 0);
-  const totalRx = connections.reduce((acc, c) => acc + c.bytes_rx, 0);
+  const totalTx = netMetrics?.total_tx_bytes ?? connections.reduce((acc, c) => acc + c.bytes_tx, 0);
+  const totalRx = netMetrics?.total_rx_bytes ?? connections.reduce((acc, c) => acc + c.bytes_rx, 0);
 
   return (
     <div className="panel" id="network-observer-panel" style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
@@ -140,14 +179,31 @@ export default function NetworkObserverPanel() {
       <div className="panel-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px", borderBottom: "1px solid var(--border)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span className="panel-title" style={{ fontWeight: 700, letterSpacing: "0.08em" }}>
-            NETWORK IDS & ATTACK / EAVESDROPPING OBSERVER
+            NETWORK IDS &amp; PACKET INSPECTOR
           </span>
-          <span className="pstat" style={{ background: "rgba(13,148,136,0.15)", color: "var(--teall)", border: "1px solid var(--teal)", padding: "2px 8px", borderRadius: 4, fontSize: 10 }}>
-            eBPF SOCKET IDS ACTIVE
+          <span
+            className="pstat"
+            style={{
+              background: packetSnapshot?.go_bridge_connected ? "rgba(13,148,136,0.18)" : "rgba(124,58,237,0.14)",
+              color: packetSnapshot?.go_bridge_connected ? "var(--teall)" : "var(--vl)",
+              border: `1px solid ${packetSnapshot?.go_bridge_connected ? "var(--teal)" : "var(--v)"}`,
+              padding: "2px 8px",
+              borderRadius: 4,
+              fontSize: 10,
+            }}
+          >
+            {packetSnapshot?.go_bridge_connected
+              ? "GO PACKET DAEMON :50053"
+              : "LINUX /proc/net/snmp INSPECTOR"}
           </span>
           <span className="pstat" style={{ padding: "2px 8px", borderRadius: 4, fontSize: 10, background: "var(--bg1)" }}>
             {connections.length} SOCKETS ({establishedCount} ESTABLISHED)
           </span>
+          {packetSnapshot && (
+            <span className="pstat" style={{ padding: "2px 8px", borderRadius: 4, fontSize: 10, background: "var(--bg1)" }}>
+              {packetSnapshot.snmp_counters.segments_per_sec} SEG/S
+            </span>
+          )}
           {suspiciousCount > 0 && (
             <span className="pstat" style={{ background: "rgba(225,29,72,0.15)", color: "var(--redl)", border: "1px solid var(--red)", padding: "2px 8px", borderRadius: 4, fontSize: 10 }}>
               {suspiciousCount} THREATS
@@ -174,82 +230,65 @@ export default function NetworkObserverPanel() {
         </div>
       </div>
 
-      {/* Real-time Network Metrics Strip & Attack Simulators */}
+      {/* Real-time /proc/net/dev Network Interface Counters Strip */}
       <div className="scan-summary-bar" style={{ display: "flex", flexWrap: "wrap", gap: 12, padding: "8px 16px", alignItems: "center", background: "var(--bg1)", borderBottom: "1px solid var(--border)" }}>
         <div className="sum-pill" style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 10px", background: "var(--bg0)", borderRadius: 4, border: "1px solid var(--border)" }}>
           <span className="sum-pill-val" style={{ fontSize: 12, fontWeight: 700, color: "var(--teall)" }}>
-            {(totalTx / 1024).toFixed(1)} KB
+            {fmtNetBytes(totalTx)}
           </span>
-          <span className="sum-pill-label" style={{ fontSize: 9, color: "var(--tx2)", textTransform: "uppercase" }}>OUTBOUND TX</span>
+          <span className="sum-pill-label" style={{ fontSize: 9, color: "var(--tx2)", textTransform: "uppercase" }}>TOTAL TX (/proc/net/dev)</span>
         </div>
 
         <div className="sum-pill" style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 10px", background: "var(--bg0)", borderRadius: 4, border: "1px solid var(--border)" }}>
           <span className="sum-pill-val" style={{ fontSize: 12, fontWeight: 700, color: "var(--vl)" }}>
-            {(totalRx / 1024).toFixed(1)} KB
+            {fmtNetBytes(totalRx)}
           </span>
-          <span className="sum-pill-label" style={{ fontSize: 9, color: "var(--tx2)", textTransform: "uppercase" }}>INBOUND RX</span>
+          <span className="sum-pill-label" style={{ fontSize: 9, color: "var(--tx2)", textTransform: "uppercase" }}>TOTAL RX (/proc/net/dev)</span>
         </div>
 
         <div className="sum-pill" style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 10px", background: "var(--bg0)", borderRadius: 4, border: "1px solid var(--border)" }}>
           <span className="sum-pill-val" style={{ fontSize: 12, fontWeight: 700, color: attacks.length > 0 ? "var(--redl)" : "var(--tx2)" }}>
             {attacks.length}
           </span>
-          <span className="sum-pill-label" style={{ fontSize: 9, color: "var(--tx2)", textTransform: "uppercase" }}>ATTACKS INTERCEPTED</span>
+          <span className="sum-pill-label" style={{ fontSize: 9, color: "var(--tx2)", textTransform: "uppercase" }}>REAL NETWORK ALERTS</span>
         </div>
 
-        {/* Attack Simulation Quick Buttons for Verification */}
-        <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
-          <span style={{ fontSize: 10, color: "var(--tx2)", textTransform: "uppercase" }}>TEST ATTACK:</span>
-          <button
-            className="action-btn"
-            style={{ fontSize: 10, padding: "4px 8px", background: "var(--bg0)", border: "1px solid var(--border)", borderRadius: 3, cursor: "pointer", color: "var(--redl)" }}
-            onClick={() => handleSimulateAttack("ARP_POISON_SNIFF")}
-            disabled={simulating}
-          >
-            ARP SNIFF (MITM)
-          </button>
-          <button
-            className="action-btn"
-            style={{ fontSize: 10, padding: "4px 8px", background: "var(--bg0)", border: "1px solid var(--border)", borderRadius: 3, cursor: "pointer", color: "var(--orangel)" }}
-            onClick={() => handleSimulateAttack("PORT_SCAN_RECON")}
-            disabled={simulating}
-          >
-            PORT SCAN
-          </button>
-          <button
-            className="action-btn"
-            style={{ fontSize: 10, padding: "4px 8px", background: "var(--bg0)", border: "1px solid var(--border)", borderRadius: 3, cursor: "pointer", color: "var(--redl)" }}
-            onClick={() => handleSimulateAttack("SYN_FLOOD_DOS")}
-            disabled={simulating}
-          >
-            SYN FLOOD
-          </button>
-          <button
-            className="action-btn"
-            style={{ fontSize: 10, padding: "4px 8px", background: "var(--bg0)", border: "1px solid var(--border)", borderRadius: 3, cursor: "pointer", color: "var(--redl)" }}
-            onClick={() => handleSimulateAttack("DNS_TUNNEL_EXFIL")}
-            disabled={simulating}
-          >
-            DNS TUNNEL
-          </button>
-          <button
-            className="action-btn"
-            style={{ fontSize: 10, padding: "4px 8px", background: "var(--bg0)", border: "1px solid var(--border)", borderRadius: 3, cursor: "pointer", color: "var(--redl)" }}
-            onClick={() => handleSimulateAttack("REVERSE_TCP_C2")}
-            disabled={simulating}
-          >
-            REVERSE TCP C2
-          </button>
-        </div>
+        {netMetrics?.interfaces && netMetrics.interfaces.length > 0 && (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+            {netMetrics.interfaces.slice(0, 4).map((iface) => (
+              <span
+                key={iface.iface}
+                style={{
+                  fontSize: 9,
+                  fontFamily: "var(--mono)",
+                  padding: "3px 7px",
+                  borderRadius: 3,
+                  background: "var(--bg0)",
+                  border: "1px solid var(--border)",
+                  color: "var(--tx1)",
+                }}
+              >
+                {iface.iface}: ↑{fmtNetBytes(iface.tx_bytes)} ↓{fmtNetBytes(iface.rx_bytes)}
+              </span>
+            ))}
+          </div>
+        )}
 
         {/* View switcher */}
-        <div style={{ display: "flex", gap: 4 }}>
+        <div style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
           <button
             className={`sm-btn ${subTab === "connections" ? "sm-btn--active" : ""}`}
             onClick={() => setSubTab("connections")}
             style={{ fontSize: 10, padding: "4px 10px", borderRadius: 4 }}
           >
             SOCKETS ({filteredConns.length})
+          </button>
+          <button
+            className={`sm-btn ${subTab === "packet" ? "sm-btn--active" : ""}`}
+            onClick={() => setSubTab("packet")}
+            style={{ fontSize: 10, padding: "4px 10px", borderRadius: 4 }}
+          >
+            PACKET INSPECTOR ({packetSnapshot?.flow_findings.length ?? 0})
           </button>
           <button
             className={`sm-btn ${subTab === "attacks" ? "sm-btn--active" : ""}`}
@@ -336,15 +375,15 @@ export default function NetworkObserverPanel() {
                     borderLeft: isBad ? "3px solid var(--red)" : "3px solid transparent",
                   }}
                 >
-                  <span style={{ fontFamily: "monospace", fontSize: 10, color: "var(--tx2)" }}>{c.proto}</span>
-                  <span style={{ fontFamily: "monospace", fontSize: 10 }}>{c.local_addr}:{c.local_port}</span>
-                  <span style={{ fontFamily: "monospace", fontSize: 10, color: isBad ? "var(--redl)" : "var(--tx)" }}>
+                  <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--tx2)" }}>{c.proto}</span>
+                  <span style={{ fontFamily: "var(--mono)", fontSize: 10 }}>{c.local_addr}:{c.local_port}</span>
+                  <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: isBad ? "var(--redl)" : "var(--tx)" }}>
                     {c.remote_addr}:{c.remote_port}
                   </span>
                   <span style={{ fontSize: 11 }}>{c.process_name}</span>
                   <span style={{ fontSize: 10, color: c.state === "ESTABLISHED" ? "var(--teall)" : "var(--tx2)" }}>{c.state}</span>
-                  <span style={{ fontSize: 10, fontFamily: "monospace", color: "var(--tx2)" }}>
-                    ↑{(c.bytes_tx / 1024).toFixed(1)}k ↓{(c.bytes_rx / 1024).toFixed(1)}k
+                  <span style={{ fontSize: 10, fontFamily: "var(--mono)", color: "var(--tx2)" }}>
+                    TX {(c.bytes_tx / 1024).toFixed(1)}k · RX {(c.bytes_rx / 1024).toFixed(1)}k
                   </span>
                   <span>
                     {isBad ? (
@@ -376,6 +415,196 @@ export default function NetworkObserverPanel() {
         </div>
       )}
 
+      {/* Subtab 1b: Go Packet Inspector & /proc/net/snmp L3/L4 Engine */}
+      {subTab === "packet" && (
+        <div style={{ flex: 1, overflowY: "auto", padding: "14px 16px", display: "flex", flexDirection: "column", gap: 14 }}>
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+              padding: "10px 14px",
+              background: "var(--bg1)",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+            }}
+          >
+            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "var(--tx)" }}>
+                HIGH-PERFORMANCE L3/L4 PACKET &amp; FLOW INSPECTION ENGINE
+              </span>
+              <span style={{ fontSize: 10, color: "var(--tx2)" }}>
+                Bridge:{" "}
+                <strong style={{ color: packetSnapshot?.go_bridge_connected ? "var(--teall)" : "var(--vl)" }}>
+                  {packetSnapshot?.go_bridge_connected
+                    ? "Go Daemon Connected (127.0.0.1:50053)"
+                    : "Linux /proc/net/snmp Live Inspector (Go TCP Bridge :50053 Ready)"}
+                </strong>{" "}
+                · Workers: {packetSnapshot?.stats.worker_threads ?? 2}
+              </span>
+            </div>
+            <button className="sm-btn" onClick={loadData} style={{ fontSize: 10, padding: "4px 10px" }}>
+              ↻ REFRESH SNAPSHOT
+            </button>
+          </div>
+
+          {packetSnapshot && (
+            <>
+              {/* L3/L4 Counters Grid */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(175px, 1fr))", gap: 10 }}>
+                {[
+                  {
+                    label: "SEGMENTS / PACKETS",
+                    value: packetSnapshot.stats.packets_inspected.toLocaleString(),
+                    sub: `${packetSnapshot.snmp_counters.segments_per_sec} seg/s live rate`,
+                    color: "var(--teall)",
+                  },
+                  {
+                    label: "TCP IN / OUT SEGS",
+                    value: `${packetSnapshot.snmp_counters.tcp_in_segs.toLocaleString()} / ${packetSnapshot.snmp_counters.tcp_out_segs.toLocaleString()}`,
+                    sub: `Retrans: ${packetSnapshot.snmp_counters.tcp_retrans_segs} (${packetSnapshot.snmp_counters.retrans_rate_pct}%)`,
+                    color: "var(--tx0)",
+                  },
+                  {
+                    label: "UDP / ICMP DATAGRAMS",
+                    value: `${(packetSnapshot.snmp_counters.udp_in_datagrams + packetSnapshot.snmp_counters.udp_out_datagrams).toLocaleString()}`,
+                    sub: `ICMP In/Out: ${packetSnapshot.snmp_counters.icmp_in_msgs}/${packetSnapshot.snmp_counters.icmp_out_msgs}`,
+                    color: "var(--vl)",
+                  },
+                  {
+                    label: "IP RECEIVES / OUT",
+                    value: `${packetSnapshot.snmp_counters.ip_in_receives.toLocaleString()} / ${packetSnapshot.snmp_counters.ip_out_requests.toLocaleString()}`,
+                    sub: `Header Errors: ${packetSnapshot.snmp_counters.ip_in_hdr_errors}`,
+                    color: "var(--tx0)",
+                  },
+                  {
+                    label: "SYN_RECV BACKLOG",
+                    value: String(packetSnapshot.stats.active_syn_recv),
+                    sub: `TCP Established: ${packetSnapshot.snmp_counters.tcp_curr_estab}`,
+                    color: packetSnapshot.stats.active_syn_recv >= packetSnapshot.config.syn_flood_threshold ? "var(--redl)" : "var(--teall)",
+                  },
+                  {
+                    label: "FLOWS ANALYZED",
+                    value: packetSnapshot.stats.flows_analyzed.toLocaleString(),
+                    sub: `Findings: ${packetSnapshot.stats.anomalies_found} · Queues: ${fmtNetBytes(packetSnapshot.stats.bytes_inspected)}`,
+                    color: "var(--tx0)",
+                  },
+                ].map((card) => (
+                  <div
+                    key={card.label}
+                    style={{
+                      padding: "10px 12px",
+                      background: "var(--bg1)",
+                      border: "1px solid var(--border)",
+                      borderRadius: 6,
+                    }}
+                  >
+                    <div style={{ fontSize: 9, color: "var(--tx2)", letterSpacing: "0.06em", fontWeight: 700 }}>{card.label}</div>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: card.color, marginTop: 4, fontFamily: "var(--mono)" }}>{card.value}</div>
+                    <div style={{ fontSize: 9, color: "var(--tx2)", marginTop: 2 }}>{card.sub}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Guard Controls */}
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", padding: "10px 14px", background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 6 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: "var(--tx2)", marginRight: 4 }}>INSPECTOR GUARDS:</span>
+                {(
+                  [
+                    ["deep_inspection", "Deep Inspection"],
+                    ["syn_flood_guard", "SYN Flood Guard"],
+                    ["port_scan_guard", "Port Sweep Guard"],
+                    ["dns_tunnel_guard", "DNS Tunnel Guard"],
+                    ["arp_spoof_guard", "ARP Collision Guard"],
+                  ] as Array<[keyof PacketInspectorConfig, string]>
+                ).map(([key, label]) => {
+                  const active = Boolean(packetSnapshot.config[key]);
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => togglePacketInspectorOption(key)}
+                      className={`sm-btn ${active ? "sm-btn--active" : ""}`}
+                      style={{ fontSize: 10, padding: "4px 10px" }}
+                    >
+                      {active ? "✓" : "○"} {label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Flow Inspection Findings */}
+              <div style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
+                <div style={{ padding: "8px 14px", borderBottom: "1px solid var(--border)", fontSize: 10, fontWeight: 700, color: "var(--tx2)", letterSpacing: "0.06em" }}>
+                  PACKET &amp; FLOW INSPECTION FINDINGS ({packetSnapshot.flow_findings.length})
+                </div>
+                {packetSnapshot.flow_findings.length === 0 ? (
+                  <div style={{ padding: 20, textAlign: "center", fontSize: 11, color: "var(--tx2)" }}>
+                    No anomalous L3/L4 flows, half-open SYN floods, C2 sockets, or horizontal port sweeps observed.
+                  </div>
+                ) : (
+                  <div>
+                    {packetSnapshot.flow_findings.map((f) => (
+                      <div
+                        key={f.id}
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "95px 110px 150px 150px 1fr 110px",
+                          padding: "8px 14px",
+                          borderBottom: "1px solid var(--border)",
+                          fontSize: 10,
+                          alignItems: "center",
+                          gap: 8,
+                        }}
+                      >
+                        <span style={{ fontWeight: 700, color: f.severity === "critical" ? "var(--redl)" : "var(--amberl)" }}>
+                          {f.rule}
+                        </span>
+                        <span style={{ color: "var(--tx)" }}>{f.process} ({f.pid})</span>
+                        <span style={{ fontFamily: "var(--mono)", color: "var(--tx2)" }}>{f.src_endpoint}</span>
+                        <span style={{ fontFamily: "var(--mono)", color: "var(--redl)" }}>{f.dst_endpoint}</span>
+                        <span style={{ color: "var(--tx1)" }}>{f.summary}</span>
+                        <span style={{ textAlign: "right", fontWeight: 700, color: "var(--teall)" }}>{f.action_taken}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Live Kernel ARP Table */}
+              <div style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
+                <div style={{ padding: "8px 14px", borderBottom: "1px solid var(--border)", fontSize: 10, fontWeight: 700, color: "var(--tx2)", letterSpacing: "0.06em" }}>
+                  LIVE /proc/net/arp NEIGHBOR TABLE ({packetSnapshot.arp_table.length})
+                </div>
+                {packetSnapshot.arp_table.length === 0 ? (
+                  <div style={{ padding: 14, fontSize: 10, color: "var(--tx2)" }}>No ARP neighbor entries present on host interface.</div>
+                ) : (
+                  packetSnapshot.arp_table.map((a, idx) => (
+                    <div
+                      key={`${a.ip}-${idx}`}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "150px 180px 100px 1fr",
+                        padding: "6px 14px",
+                        borderBottom: "1px solid var(--border)",
+                        fontSize: 10,
+                        fontFamily: "var(--mono)",
+                      }}
+                    >
+                      <span>{a.ip}</span>
+                      <span style={{ color: "var(--teall)" }}>{a.hw_addr}</span>
+                      <span>{a.device}</span>
+                      <span style={{ color: "var(--tx2)" }}>flags {a.flags}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       {/* Subtab 2: Attack Events & Eavesdropping / Sniffing Alarms */}
       {subTab === "attacks" && (
         <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
@@ -392,95 +621,13 @@ export default function NetworkObserverPanel() {
               gap: 10,
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--tx)", display: "flex", alignItems: "center", gap: 5 }}>
-                <span style={{ color: "var(--red)" }}>⚡</span> SIMULATE INTERNET ATTACK:
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: "var(--teall)" }}>
+                LIVE /proc/net &amp; /proc/net/arp MONITORING ACTIVE
               </span>
-              <button
-                disabled={simulating}
-                onClick={() => handleSimulateAttack("ARP_POISON_SNIFF")}
-                style={{
-                  padding: "4px 10px",
-                  fontSize: 10,
-                  fontWeight: 600,
-                  borderRadius: 4,
-                  border: "1px solid rgba(245,158,11,0.4)",
-                  background: "rgba(245,158,11,0.1)",
-                  color: "var(--orangel)",
-                  cursor: "pointer",
-                }}
-                title="Simulate promiscuous mode raw packet sniffing and unauthorized eavesdropping"
-              >
-                📡 Packet Sniffing
-              </button>
-              <button
-                disabled={simulating}
-                onClick={() => handleSimulateAttack("SYN_FLOOD_DOS")}
-                style={{
-                  padding: "4px 10px",
-                  fontSize: 10,
-                  fontWeight: 600,
-                  borderRadius: 4,
-                  border: "1px solid rgba(225,29,72,0.4)",
-                  background: "rgba(225,29,72,0.1)",
-                  color: "var(--redl)",
-                  cursor: "pointer",
-                }}
-                title="Simulate high-volume TCP SYN flood denial of service attack"
-              >
-                🌊 SYN Flood DoS
-              </button>
-              <button
-                disabled={simulating}
-                onClick={() => handleSimulateAttack("PORT_SCAN_RECON")}
-                style={{
-                  padding: "4px 10px",
-                  fontSize: 10,
-                  fontWeight: 600,
-                  borderRadius: 4,
-                  border: "1px solid rgba(147,51,234,0.4)",
-                  background: "rgba(147,51,234,0.1)",
-                  color: "var(--purplel)",
-                  cursor: "pointer",
-                }}
-                title="Simulate stealth port scanning (FIN/NULL/XMAS probe flags)"
-              >
-                🔍 Stealth Port Scan
-              </button>
-              <button
-                disabled={simulating}
-                onClick={() => handleSimulateAttack("REVERSE_TCP_C2")}
-                style={{
-                  padding: "4px 10px",
-                  fontSize: 10,
-                  fontWeight: 600,
-                  borderRadius: 4,
-                  border: "1px solid rgba(225,29,72,0.4)",
-                  background: "rgba(225,29,72,0.1)",
-                  color: "var(--redl)",
-                  cursor: "pointer",
-                }}
-                title="Simulate reverse shell interactive C2 connection attempt"
-              >
-                🐚 Reverse Shell C2
-              </button>
-              <button
-                disabled={simulating}
-                onClick={() => handleSimulateAttack("DNS_TUNNEL_EXFIL")}
-                style={{
-                  padding: "4px 10px",
-                  fontSize: 10,
-                  fontWeight: 600,
-                  borderRadius: 4,
-                  border: "1px solid rgba(13,148,136,0.4)",
-                  background: "rgba(13,148,136,0.1)",
-                  color: "var(--teall)",
-                  cursor: "pointer",
-                }}
-                title="Simulate high-entropy base32 DNS tunneling data exfiltration"
-              >
-                📤 DNS Exfiltration
-              </button>
+              <span style={{ fontSize: 10, color: "var(--tx2)" }}>
+                Only real socket IOC hits, suspicious ports, or duplicate ARP MAC collisions appear here.
+              </span>
             </div>
 
             {/* Manual IP Null-Route Enforcer */}
@@ -498,7 +645,7 @@ export default function NetworkObserverPanel() {
                   fontSize: 11,
                   color: "var(--tx)",
                   width: 170,
-                  fontFamily: "monospace",
+                  fontFamily: "var(--mono)",
                 }}
               />
               <button
@@ -521,7 +668,7 @@ export default function NetworkObserverPanel() {
                   opacity: manualIp.trim() ? 1 : 0.6,
                 }}
               >
-                ⛔ Drop IP
+                DROP IP
               </button>
             </div>
           </div>
@@ -543,17 +690,17 @@ export default function NetworkObserverPanel() {
             }}
           >
             <span>ATTACK TYPE</span>
-            <span>SOURCE & PORT</span>
+            <span>SOURCE &amp; PORT</span>
             <span>TARGET DEST</span>
             <span>SEVERITY / PROTO</span>
-            <span>IDS PACKET FORENSICS & SIGNATURE</span>
+            <span>IDS PACKET FORENSICS &amp; SIGNATURE</span>
             <span style={{ textAlign: "right" }}>DEFENSE ACTION</span>
           </div>
 
           <div style={{ flex: 1, overflowY: "auto" }}>
             {attacks.length === 0 ? (
               <div style={{ padding: 32, textAlign: "center", color: "var(--tx2)", fontSize: 12 }}>
-                No network attacks recorded. Click any simulation button above to trigger an attack scenario and test active firewall response.
+                No real network attacks or suspicious socket/ARP anomalies detected on host interfaces.
               </div>
             ) : (
               attacks.map((a) => {
@@ -575,28 +722,28 @@ export default function NetworkObserverPanel() {
                     <div>
                       <div style={{ fontSize: 10, fontWeight: 700, color: a.severity === "critical" ? "var(--redl)" : "var(--orangel)" }}>
                         {a.attack_type === "ARP_POISON_SNIFF"
-                          ? "📡 Packet Sniffing"
+                          ? "ARP Spoofing / Sniff"
                           : a.attack_type === "SYN_FLOOD_DOS"
-                          ? "🌊 SYN Flood DoS"
+                          ? "SYN Flood DoS"
                           : a.attack_type === "PORT_SCAN_RECON"
-                          ? "🔍 Stealth Scan"
+                          ? "Stealth Port Scan"
                           : a.attack_type === "REVERSE_TCP_C2"
-                          ? "🐚 Reverse C2"
+                          ? "Reverse TCP C2"
                           : a.attack_type === "DNS_TUNNEL_EXFIL"
-                          ? "📤 DNS Exfiltration"
+                          ? "DNS Exfiltration"
                           : a.attack_type}
                       </div>
                       <div style={{ fontSize: 8, color: "var(--tx2)", textTransform: "uppercase" }}>{a.attack_type}</div>
                     </div>
 
-                    <div style={{ fontFamily: "monospace", fontSize: 10 }}>
+                    <div style={{ fontFamily: "var(--mono)", fontSize: 10 }}>
                       <span style={{ color: isBlocked ? "var(--teall)" : "var(--redl)", fontWeight: 600 }}>{a.source_ip}</span>:{a.source_port}
                       {isBlocked && (
                         <div style={{ fontSize: 8, color: "var(--teall)", fontWeight: 700 }}>[NULL-ROUTED]</div>
                       )}
                     </div>
 
-                    <div style={{ fontFamily: "monospace", fontSize: 10 }}>
+                    <div style={{ fontFamily: "var(--mono)", fontSize: 10 }}>
                       {a.target_ip}:{a.target_port}
                     </div>
 
@@ -617,7 +764,7 @@ export default function NetworkObserverPanel() {
 
                     <div>
                       <div style={{ fontSize: 11, color: "var(--tx)", fontWeight: 500 }}>{a.packet_summary}</div>
-                      <div style={{ fontSize: 9, color: "var(--tx2)", fontFamily: "monospace", marginTop: 2 }}>{a.signature_hit}</div>
+                      <div style={{ fontSize: 9, color: "var(--tx2)", fontFamily: "var(--mono)", marginTop: 2 }}>{a.signature_hit}</div>
                     </div>
 
                     <div style={{ textAlign: "right", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
@@ -663,7 +810,7 @@ export default function NetworkObserverPanel() {
                             fontWeight: 600,
                           }}
                         >
-                          🛡️ Block IP (Null-Route)
+                          Block IP (Null-Route)
                         </button>
                       )}
                     </div>
@@ -721,16 +868,16 @@ export default function NetworkObserverPanel() {
                   <span style={{ color: "var(--tx2)", fontSize: 10 }}>
                     {new Date(q.ts).toLocaleTimeString("en-GB", { hour12: false })}
                   </span>
-                  <span style={{ color: isBad ? "var(--redl)" : "var(--tx)", fontWeight: isBad ? 700 : 400, fontFamily: "monospace", fontSize: 11 }}>
+                  <span style={{ color: isBad ? "var(--redl)" : "var(--tx)", fontWeight: isBad ? 700 : 400, fontFamily: "var(--mono)", fontSize: 11 }}>
                     {q.query}
                   </span>
                   <span style={{ color: "var(--tx2)", fontSize: 10 }}>{q.qtype}</span>
-                  <span style={{ color: "var(--tx)", fontFamily: "monospace", fontSize: 11 }}>{q.resolved_ip}</span>
+                  <span style={{ color: "var(--tx)", fontFamily: "var(--mono)", fontSize: 11 }}>{q.resolved_ip}</span>
                   <span style={{ color: "var(--tx2)", fontSize: 11 }}>{q.process_name}</span>
                   <span>
                     {isBad ? (
                       <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 3, background: "rgba(225,29,72,0.15)", color: "var(--redl)", fontWeight: 700 }}>
-                        ⚠ C2 FLAGGED
+                        C2 FLAGGED
                       </span>
                     ) : (
                       <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 3, background: "rgba(13,148,136,0.15)", color: "var(--teall)", fontWeight: 600 }}>

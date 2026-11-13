@@ -1,13 +1,40 @@
 import { useState, useEffect, useMemo } from "react";
 import { invoke } from "../lib/ipc/core";
-import { listen } from "../lib/ipc/event";
-import type { TelemetryEvent, Severity } from "../types";
+import { useProcessStore } from "../store/processStore";
+import type { TelemetryEvent } from "../types";
+
+type SeverityFilter = "all" | "critical" | "high" | "warning" | "info";
+type SortMode = "priority" | "newest";
+
+function getSeverityBucket(ev: TelemetryEvent): "critical" | "high" | "warning" | "info" {
+  const sev = String(ev.severity || "").toLowerCase();
+  if (sev === "critical" || ev.score >= 90) {
+    return "critical";
+  }
+  if (sev === "high" || ev.score >= 70 || ev.verdict === "alert") {
+    return "high";
+  }
+  if (sev === "medium" || (ev.score >= 35 && ev.score < 70) || ev.verdict === "monitored") {
+    return "warning";
+  }
+  return "info";
+}
+
+function getPriorityWeight(ev: TelemetryEvent): number {
+  const bucket = getSeverityBucket(ev);
+  if (bucket === "critical") return 4;
+  if (bucket === "high") return 3;
+  if (bucket === "warning") return 2;
+  return 1;
+}
 
 export default function TelemetryLogPanel() {
-  const [telemetry, setTelemetry] = useState<TelemetryEvent[]>([]);
+  const { store, dispatch } = useProcessStore();
+  const telemetry = store.telemetry;
   const [search, setSearch] = useState("");
-  const [severityFilter, setSeverityFilter] = useState<Severity | "all">("all");
+  const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("all");
   const [verdictFilter, setVerdictFilter] = useState<"all" | "alert" | "monitored" | "suppressed" | "clean">("all");
+  const [sortMode, setSortMode] = useState<SortMode>("priority");
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // Live Evaluator state
@@ -19,39 +46,17 @@ export default function TelemetryLogPanel() {
   const [evalDestination, setEvalDestination] = useState("registry.npmjs.org");
   const [evalResult, setEvalResult] = useState<any | null>(null);
   const [evaluating, setEvaluating] = useState(false);
-  const [scenarioNotice, setScenarioNotice] = useState<string | null>(null);
 
-  // Fetch initial telemetry
+  // Sync latest telemetry buffer from backend IPC
   useEffect(() => {
-    invoke<TelemetryEvent[]>("list_telemetry", { limit: 120 })
+    invoke<TelemetryEvent[]>("list_telemetry", { limit: 200 })
       .then((res) => {
-        if (Array.isArray(res)) setTelemetry(res);
+        if (Array.isArray(res)) {
+          dispatch({ type: "SET_TELEMETRY", payload: res });
+        }
       })
       .catch((err) => console.error("Failed to load telemetry:", err));
-
-    const unlistenPromise = listen<TelemetryEvent>("telemetry-event", (event) => {
-      setTelemetry((prev) => [event.payload, ...prev]);
-    });
-
-    return () => {
-      unlistenPromise.then((unlisten) => unlisten());
-    };
-  }, []);
-
-  const runScenario = async (scenario: string) => {
-    setScenarioNotice(null);
-    try {
-      const res = await invoke<any>("simulate_movement_scenario", { scenario });
-      if (res && res.message) {
-        setScenarioNotice(res.message);
-        // Refresh telemetry list
-        const updated = await invoke<TelemetryEvent[]>("list_telemetry", { limit: 120 });
-        if (Array.isArray(updated)) setTelemetry(updated);
-      }
-    } catch (err) {
-      console.error("Scenario execution error:", err);
-    }
-  };
+  }, [dispatch]);
 
   const runEvaluator = async () => {
     setEvaluating(true);
@@ -71,9 +76,24 @@ export default function TelemetryLogPanel() {
     }
   };
 
+  const severityCounts = useMemo(() => {
+    let critical = 0;
+    let high = 0;
+    let warning = 0;
+    let info = 0;
+    for (const ev of telemetry) {
+      const b = getSeverityBucket(ev);
+      if (b === "critical") critical++;
+      else if (b === "high") high++;
+      else if (b === "warning") warning++;
+      else info++;
+    }
+    return { critical, high, warning, info, total: telemetry.length };
+  }, [telemetry]);
+
   const filteredEvents = useMemo(() => {
-    return telemetry.filter((ev) => {
-      if (severityFilter !== "all" && ev.severity !== severityFilter) return false;
+    const filtered = telemetry.filter((ev) => {
+      if (severityFilter !== "all" && getSeverityBucket(ev) !== severityFilter) return false;
       if (verdictFilter !== "all" && ev.verdict !== verdictFilter) return false;
       if (search) {
         const q = search.toLowerCase();
@@ -81,12 +101,23 @@ export default function TelemetryLogPanel() {
         const matchesParent = ev.parent.toLowerCase().includes(q);
         const matchesDetail = ev.detail.toLowerCase().includes(q);
         const matchesMitre = (ev.mitre || "").toLowerCase().includes(q);
+        const matchesRule = (ev.rule || "").toLowerCase().includes(q);
         const matchesCmd = (ev.cmdline || []).join(" ").toLowerCase().includes(q);
-        return matchesName || matchesParent || matchesDetail || matchesMitre || matchesCmd;
+        return matchesName || matchesParent || matchesDetail || matchesMitre || matchesRule || matchesCmd;
       }
       return true;
     });
-  }, [telemetry, severityFilter, verdictFilter, search]);
+
+    return [...filtered].sort((a, b) => {
+      if (sortMode === "priority") {
+        const pw = getPriorityWeight(b) - getPriorityWeight(a);
+        if (pw !== 0) return pw;
+        const scoreDiff = (b.score || 0) - (a.score || 0);
+        if (scoreDiff !== 0) return scoreDiff;
+      }
+      return Number(b.ts) - Number(a.ts);
+    });
+  }, [telemetry, severityFilter, verdictFilter, search, sortMode]);
 
   return (
     <div className="panel">
@@ -110,124 +141,15 @@ export default function TelemetryLogPanel() {
           <input
             className="search-input"
             type="text"
-            placeholder="Search movements, PIDs, MITRE, cmd..."
+            placeholder="Search PID, MITRE, cmd…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            style={{ width: 175 }}
           />
         </div>
       </div>
 
-      {/* Scenario Simulation & Injection Bar */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          padding: "6px 14px",
-          background: "var(--bg2)",
-          borderBottom: "1px solid var(--border)",
-          flexWrap: "wrap",
-        }}
-      >
-        <span style={{ fontSize: 9, color: "var(--tx2)", letterSpacing: "0.08em", fontWeight: 700 }}>
-          TEST ENGINE SCENARIOS:
-        </span>
-
-        <button
-          className="sm-btn"
-          onClick={() => runScenario("benign_dev")}
-          title="Verify developer build tools are suppressed and NOT falsely marked High/Critical"
-        >
-          ✓ Test Benign Dev Tool (npm / curl)
-        </button>
-
-        <button
-          className="sm-btn"
-          onClick={() => runScenario("admin_audit")}
-          title="Verify administrative diagnostic shell sessions are clean"
-        >
-          ✓ Test Admin Diagnostics (ps / sshd)
-        </button>
-
-        <button
-          className="sm-btn"
-          onClick={() => runScenario("suspicious_script")}
-          title="Verify ambiguous script is properly tiered as MEDIUM (no false critical)"
-        >
-          ⚠ Test Base64 Script (Medium Tier)
-        </button>
-
-        <button
-          className="sm-btn"
-          onClick={() => runScenario("virus_attack")}
-          title="Verify Anti-Virus heuristics detect malicious miners, webshells, or trojans"
-          style={{ borderColor: "rgba(220,38,38,.5)", color: "var(--redl)" }}
-        >
-          ⚡ Test Virus (XMRig Miner)
-        </button>
-
-        <button
-          className="sm-btn"
-          onClick={() => runScenario("ransomware_attack")}
-          title="Verify high-entropy volume encryption is trapped and flagged with MAL-RANSOM-DEADBOLT"
-          style={{ borderColor: "rgba(220,38,38,.5)", color: "var(--redl)" }}
-        >
-          ⚡ Test Ransomware (DeadBolt)
-        </button>
-
-        <button
-          className="sm-btn"
-          onClick={() => runScenario("rootkit_attack")}
-          title="Verify kernel module injection and syscall detours are detected"
-          style={{ borderColor: "rgba(220,38,38,.5)", color: "var(--redl)" }}
-        >
-          ⚡ Test Rootkit (Diamorphine LKM)
-        </button>
-
-        <button
-          className="sm-btn"
-          onClick={() => runScenario("webshell_attack")}
-          title="Verify web server child eval injection is trapped"
-          style={{ borderColor: "rgba(220,38,38,.5)", color: "var(--redl)" }}
-        >
-          ⚡ Test WebShell (C99 RCE)
-        </button>
-
-        <button
-          className="sm-btn"
-          onClick={() => runScenario("multi_stage_c2")}
-          title="Verify genuine multi-stage attack triggers CRITICAL alert"
-          style={{ borderColor: "rgba(220,38,38,.4)", color: "var(--redl)" }}
-        >
-          ⚡ Test Multi-Stage C2 Dropper (Critical)
-        </button>
-      </div>
-
-      {/* Scenario Notice Banner */}
-      {scenarioNotice && (
-        <div
-          style={{
-            padding: "8px 14px",
-            background: "rgba(124,58,237,.08)",
-            borderBottom: "1px solid var(--vd)",
-            color: "var(--vl)",
-            fontSize: 10,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-          }}
-        >
-          <span>◈ {scenarioNotice}</span>
-          <button
-            onClick={() => setScenarioNotice(null)}
-            style={{ color: "var(--tx2)", fontSize: 11, cursor: "pointer" }}
-          >
-            ✕
-          </button>
-        </div>
-      )}
-
-      {/* Interactive Live Rule Evaluator Drawer */}
+      {/* Interactive Dry-Run Rule Evaluator Drawer (read-only formula check, zero telemetry side effects) */}
       {showEvaluator && (
         <div
           style={{
@@ -241,10 +163,10 @@ export default function TelemetryLogPanel() {
         >
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <span style={{ fontSize: 10, fontWeight: 700, color: "var(--vl)", letterSpacing: "0.08em" }}>
-              LIVE DETECTION & SCORING EVALUATOR (FALSE-POSITIVE & ESCALATION TESTER)
+              READ-ONLY DRY-RUN RULE EVALUATOR (NO TELEMETRY OR INCIDENT SIDE EFFECTS)
             </span>
             <span style={{ fontSize: 9, color: "var(--tx2)" }}>
-              Test how the internal engine scores any process, lineage, or command line without modifying live state.
+              Checks how the scoring matrix classifies a command without injecting fake events.
             </span>
           </div>
 
@@ -300,7 +222,7 @@ export default function TelemetryLogPanel() {
               }}
               style={{ borderColor: "rgba(220,38,38,.5)", color: "var(--redl)" }}
             >
-              ⚡ Virus: XMRig Miner
+              Virus: XMRig Miner
             </button>
             <button
               className="sm-btn"
@@ -313,7 +235,7 @@ export default function TelemetryLogPanel() {
               }}
               style={{ borderColor: "rgba(220,38,38,.5)", color: "var(--redl)" }}
             >
-              ⚡ Virus: C99 WebShell
+              Virus: C99 WebShell
             </button>
             <button
               className="sm-btn"
@@ -326,7 +248,7 @@ export default function TelemetryLogPanel() {
               }}
               style={{ borderColor: "rgba(220,38,38,.7)", color: "var(--redl)" }}
             >
-              ⚡ Critical: C2 Dropper
+              Critical: C2 Dropper
             </button>
           </div>
 
@@ -427,7 +349,7 @@ export default function TelemetryLogPanel() {
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <span style={{ fontSize: 10, fontWeight: 800, color: "var(--redl)" }}>
-                      ⚡ VIRUS SIGNATURE IDENTIFIED:
+                      VIRUS SIGNATURE IDENTIFIED:
                     </span>
                     <strong style={{ fontSize: 11, color: "var(--tx0)" }}>
                       {evalResult.virus_match.name}
@@ -474,7 +396,7 @@ export default function TelemetryLogPanel() {
                     border: "1px solid currentColor",
                   }}
                 >
-                  RISK SCORE: {evalResult.score}/100 [{evalResult.severity.toUpperCase()}]
+                  RISK SCORE: {evalResult.score}/100 [{(evalResult.severity || "informational").toUpperCase()}]
                 </span>
 
                 {/* Calibrated Rule Pill */}
@@ -601,9 +523,9 @@ export default function TelemetryLogPanel() {
         </div>
       )}
 
-      {/* Filter Tabs Bar */}
-      <div className="cat-tabs" style={{ display: "flex", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", gap: 2 }}>
+      {/* Filter Tabs & Severity Priority Bar */}
+      <div className="cat-tabs" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+        <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
           {(["all", "alert", "monitored", "suppressed", "clean"] as const).map((v) => (
             <div
               key={v}
@@ -618,18 +540,75 @@ export default function TelemetryLogPanel() {
           ))}
         </div>
 
-        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-          <span style={{ fontSize: 9, color: "var(--tx2)", letterSpacing: "0.06em" }}>SEVERITY:</span>
-          {(["all", "critical", "high", "medium", "low", "informational"] as const).map((s) => (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          {/* Priority Queue Summary Indicators */}
+          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
             <button
-              key={s}
-              className={`sm-btn ${severityFilter === s ? "sm-btn--active" : ""}`}
-              onClick={() => setSeverityFilter(s)}
-              style={{ fontSize: 8, padding: "2px 6px" }}
+              type="button"
+              className={`sm-btn ${severityFilter === "critical" ? "sm-btn--active" : ""}`}
+              onClick={() => setSeverityFilter(severityFilter === "critical" ? "all" : "critical")}
+              style={{ fontSize: 8, padding: "2px 6px", color: "var(--redl)", borderColor: "rgba(220,38,38,0.45)" }}
+              title="Filter P1 Critical Threats (Score >= 90)"
             >
-              {s.toUpperCase()}
+              P1 CRITICAL: {severityCounts.critical}
             </button>
-          ))}
+            <button
+              type="button"
+              className={`sm-btn ${severityFilter === "high" ? "sm-btn--active" : ""}`}
+              onClick={() => setSeverityFilter(severityFilter === "high" ? "all" : "high")}
+              style={{ fontSize: 8, padding: "2px 6px", color: "#fb923c", borderColor: "rgba(234,88,12,0.45)" }}
+              title="Filter P2 High Alerts (Score 70-89)"
+            >
+              P2 HIGH: {severityCounts.high}
+            </button>
+            <button
+              type="button"
+              className={`sm-btn ${severityFilter === "warning" ? "sm-btn--active" : ""}`}
+              onClick={() => setSeverityFilter(severityFilter === "warning" ? "all" : "warning")}
+              style={{ fontSize: 8, padding: "2px 6px", color: "var(--amberl)", borderColor: "rgba(217,119,6,0.45)" }}
+              title="Filter P3 Medium Warnings (Score 35-69)"
+            >
+              P3 WARN: {severityCounts.warning}
+            </button>
+            <button
+              type="button"
+              className={`sm-btn ${severityFilter === "info" ? "sm-btn--active" : ""}`}
+              onClick={() => setSeverityFilter(severityFilter === "info" ? "all" : "info")}
+              style={{ fontSize: 8, padding: "2px 6px", color: "var(--teall)", borderColor: "rgba(13,148,136,0.45)" }}
+              title="Filter P4 Informational / Clean Events"
+            >
+              P4 INFO: {severityCounts.info}
+            </button>
+          </div>
+
+          {/* Severity Filtering Dropdown */}
+          <label htmlFor="telemetry-severity-filter" style={{ fontSize: 9, color: "var(--tx2)", letterSpacing: "0.06em" }}>
+            SEVERITY:
+          </label>
+          <select
+            id="telemetry-severity-filter"
+            aria-label="Filter telemetry logs by severity level"
+            className="filter-select"
+            value={severityFilter}
+            onChange={(e) => setSeverityFilter(e.target.value as SeverityFilter)}
+          >
+            <option value="all">All Severities ({severityCounts.total})</option>
+            <option value="critical">Critical P1 ({severityCounts.critical})</option>
+            <option value="high">High P2 ({severityCounts.high})</option>
+            <option value="warning">Warning P3 ({severityCounts.warning})</option>
+            <option value="info">Info P4 ({severityCounts.info})</option>
+          </select>
+
+          {/* Priority Queue vs Chronological Order */}
+          <button
+            type="button"
+            className={`sm-btn ${sortMode === "priority" ? "sm-btn--active" : ""}`}
+            onClick={() => setSortMode((m) => (m === "priority" ? "newest" : "priority"))}
+            style={{ fontSize: 8, padding: "3px 8px" }}
+            title="Toggle between Security Priority Queue (P1 Critical -> P2 High -> P3 Warning -> P4 Info) and Chronological order"
+          >
+            {sortMode === "priority" ? "⇅ PRIORITY QUEUE" : "🕒 NEWEST FIRST"}
+          </button>
         </div>
       </div>
 
@@ -637,7 +616,7 @@ export default function TelemetryLogPanel() {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "70px 100px 180px 110px 100px 1fr 24px",
+          gridTemplateColumns: "68px 72px 110px 175px 96px 86px 1fr 24px",
           padding: "5px 14px",
           fontSize: 9,
           color: "var(--tx2)",
@@ -649,6 +628,7 @@ export default function TelemetryLogPanel() {
         }}
       >
         <span>TIME</span>
+        <span>PRIORITY</span>
         <span>EVENT TYPE</span>
         <span>LINEAGE (PARENT ➔ PROC)</span>
         <span>RISK SCORE</span>
@@ -668,6 +648,7 @@ export default function TelemetryLogPanel() {
           filteredEvents.map((ev) => {
             const isExpanded = expandedId === ev.id;
             const timeStr = new Date(ev.ts).toLocaleTimeString("en-GB", { hour12: false });
+            const sevBucket = getSeverityBucket(ev);
 
             let verdictColor = "var(--teall)";
             let verdictBg = "rgba(13,148,136,.15)";
@@ -687,6 +668,15 @@ export default function TelemetryLogPanel() {
               verdictBorder = "var(--vd)";
             }
 
+            const priMeta =
+              sevBucket === "critical"
+                ? { label: "P1 CRIT", color: "var(--redl)", bg: "rgba(220,38,38,.2)", border: "var(--red)" }
+                : sevBucket === "high"
+                ? { label: "P2 HIGH", color: "#fb923c", bg: "rgba(234,88,12,.18)", border: "rgba(234,88,12,.7)" }
+                : sevBucket === "warning"
+                ? { label: "P3 WARN", color: "var(--amberl)", bg: "rgba(217,119,6,.18)", border: "var(--amber)" }
+                : { label: "P4 INFO", color: "var(--tx1)", bg: "var(--bg3)", border: "var(--border2)" };
+
             return (
               <div
                 key={ev.id}
@@ -694,9 +684,11 @@ export default function TelemetryLogPanel() {
                   borderBottom: "1px solid rgba(37,37,50,.55)",
                   background: isExpanded ? "var(--bg3)" : "transparent",
                   borderLeft:
-                    ev.verdict === "alert"
+                    sevBucket === "critical"
                       ? "2px solid var(--red)"
-                      : ev.verdict === "monitored"
+                      : sevBucket === "high"
+                      ? "2px solid #fb923c"
+                      : sevBucket === "warning"
                       ? "2px solid var(--amber)"
                       : ev.verdict === "suppressed"
                       ? "2px solid var(--vl)"
@@ -706,7 +698,7 @@ export default function TelemetryLogPanel() {
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "70px 100px 180px 110px 100px 1fr 24px",
+                    gridTemplateColumns: "68px 72px 110px 175px 96px 86px 1fr 24px",
                     padding: "7px 14px",
                     alignItems: "center",
                     cursor: "pointer",
@@ -715,6 +707,23 @@ export default function TelemetryLogPanel() {
                   onClick={() => setExpandedId(isExpanded ? null : ev.id)}
                 >
                   <span style={{ fontSize: 9, color: "var(--tx2)" }}>{timeStr}</span>
+
+                  <div>
+                    <span
+                      style={{
+                        fontSize: 8,
+                        fontWeight: 700,
+                        padding: "1px 5px",
+                        borderRadius: 2,
+                        background: priMeta.bg,
+                        color: priMeta.color,
+                        border: `1px solid ${priMeta.border}`,
+                        letterSpacing: "0.04em",
+                      }}
+                    >
+                      {priMeta.label}
+                    </span>
+                  </div>
 
                   <span
                     style={{
@@ -727,6 +736,9 @@ export default function TelemetryLogPanel() {
                       border: "1px solid var(--border)",
                       textAlign: "center",
                       letterSpacing: "0.05em",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
                     }}
                   >
                     {ev.event_type}
@@ -810,7 +822,7 @@ export default function TelemetryLogPanel() {
                   <span
                     style={{
                       fontSize: 10,
-                      color: ev.verdict === "alert" ? "var(--tx0)" : "var(--tx1)",
+                      color: sevBucket === "critical" ? "var(--tx0)" : "var(--tx1)",
                       whiteSpace: "nowrap",
                       overflow: "hidden",
                       textOverflow: "ellipsis",
@@ -836,6 +848,22 @@ export default function TelemetryLogPanel() {
                       gap: 6,
                     }}
                   >
+                    {ev.rule && (
+                      <div className="meta-row">
+                        <span className="meta-label">RULE / TIER</span>
+                        <span style={{ fontSize: 10, color: priMeta.color, fontWeight: 700 }}>
+                          {ev.rule} ({priMeta.label})
+                        </span>
+                      </div>
+                    )}
+
+                    {ev.explanation && (
+                      <div className="meta-row">
+                        <span className="meta-label">ANALYSIS</span>
+                        <span className="meta-val">{ev.explanation}</span>
+                      </div>
+                    )}
+
                     {ev.cmdline && ev.cmdline.length > 0 && (
                       <div className="meta-row">
                         <span className="meta-label">COMMAND</span>
@@ -870,7 +898,7 @@ export default function TelemetryLogPanel() {
                     <div className="meta-row">
                       <span className="meta-label">PROCESS LINEAGE</span>
                       <span className="meta-val">
-                        Parent PID: {ev.ppid} ({ev.parent}) ➔ Child PID: {ev.pid} ({ev.process})
+                        Parent PID: {ev.ppid ?? 0} ({ev.parent}) ➔ Child PID: {ev.pid} ({ev.process})
                       </span>
                     </div>
 

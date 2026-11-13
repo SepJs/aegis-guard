@@ -1,128 +1,119 @@
 #!/usr/bin/env bash
-# aegis.sh — THE one-button launcher for Aegis-Guard
-# by Vladimir Unknown
+# aegis.sh — Cross-Platform Console & Desktop Launcher for Aegis-Guard
 #
 # Usage:
-#   bash aegis.sh              engine + dashboard
-#   AEGIS_NET=1 bash aegis.sh  engine + network observer + dashboard
-#
-# This single command:
-#   1. Fixes the IPC socket directory permissions (self-healing)
-#   2. Builds any missing binaries / npm packages (first run only)
-#   3. Starts process-engine (and optionally network-observer) in the background
-#   4. Starts the dashboard in the foreground
-#   5. Cleans up background services when the dashboard closes / Ctrl+C
-#
-# Nothing to configure. Just run it.
+#   bash aegis.sh               auto-detect console vs native Tauri desktop
+#   bash aegis.sh --console     start headless Express + SSE backend & UI on http://127.0.0.1:3000
+#   bash aegis.sh --desktop     build & launch native Tauri v2 desktop suite
+#   AEGIS_NET=1 bash aegis.sh   also launch Go raw-socket packet observer daemon
 
-set -e
+set -euo pipefail
 
 VIOLET='\033[35m'; BOLD='\033[1m'; RESET='\033[0m'
 GREEN='\033[32m'; CYAN='\033[36m'; YELLOW='\033[33m'; RED='\033[31m'
 
 cd "$(dirname "$0")"
 
-if [ ! -f "Cargo.toml" ] || [ ! -d "tauri-app" ]; then
-    echo -e "${RED}Error: run this from the aegis-guard project root${RESET}"
+if [ ! -f "package.json" ] || [ ! -d "tauri-app" ]; then
+    echo -e "${RED}Error: run this script from the aegis-guard project root.${RESET}"
     exit 1
 fi
 
-clear
+LAUNCH_MODE="auto"
+for arg in "$@"; do
+    case "$arg" in
+        --console|--web|--headless) LAUNCH_MODE="console" ;;
+        --desktop|--gui)            LAUNCH_MODE="desktop" ;;
+        --net)                      export AEGIS_NET=1 ;;
+        -h|--help)
+            echo "Aegis-Guard v1.2.0 Launcher"
+            echo "Usage: bash aegis.sh [--console | --desktop] [--net]"
+            exit 0
+            ;;
+    esac
+done
+
 echo -e "${VIOLET}${BOLD}"
-echo "  ╔═══════════════════════════════════════════╗"
-echo "  ║              AEGIS-GUARD                  ║"
-echo "  ║        by Vladimir Unknown                ║"
-echo "  ╚═══════════════════════════════════════════╝"
+echo "  ┌─────────────────────────────────────────────┐"
+echo "  │             AEGIS-GUARD v1.2.0              │"
+echo "  │    Endpoint Security & Network IDS Suite    │"
+echo "  └─────────────────────────────────────────────┘"
 echo -e "${RESET}"
 
-SOCKET_DIR="/run/aegis"
 ENGINE_PID=""
 OBSERVER_PID=""
-
 cleanup() {
-    echo ""
-    echo -e "${YELLOW}Shutting down...${RESET}"
-    [ -n "$ENGINE_PID" ]   && { sudo kill "$ENGINE_PID"   2>/dev/null || true; echo -e "  ${GREEN}✓${RESET} process-engine stopped"; }
-    [ -n "$OBSERVER_PID" ] && { sudo kill "$OBSERVER_PID" 2>/dev/null || true; echo -e "  ${GREEN}✓${RESET} network-observer stopped"; }
-    exit 0
+    if [ -n "$ENGINE_PID" ]; then kill "$ENGINE_PID" 2>/dev/null || true; fi
+    if [ -n "$OBSERVER_PID" ]; then kill "$OBSERVER_PID" 2>/dev/null || true; fi
 }
 trap cleanup INT TERM EXIT
 
-# ── 1. Socket directory — self-healing permission fix ────────────────────────
-# The dashboard (runs as your normal user) must be able to create the IPC
-# socket here; the engine (root, since it reads other users' /proc entries)
-# must be able to connect to it. Sticky + world-writable, like /tmp.
-echo -e "${CYAN}[1/5] Fixing socket permissions...${RESET}"
-sudo mkdir -p "$SOCKET_DIR"
-sudo chmod 1777 "$SOCKET_DIR"
-echo -e "  ${GREEN}✓${RESET} $SOCKET_DIR ready"
-
-# ── 2. Rust toolchain ──────────────────────────────────────────────────────────
-source "$HOME/.cargo/env" 2>/dev/null || true
-if ! command -v cargo &>/dev/null; then
-    echo -e "${YELLOW}Rust not found — installing...${RESET}"
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-    source "$HOME/.cargo/env"
+# Auto-detect console mode if no display server or Rust/Cargo absent
+if [ "$LAUNCH_MODE" = "auto" ]; then
+    if ! command -v cargo &>/dev/null || { [ "$(uname -s)" = "Linux" ] && [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; }; then
+        LAUNCH_MODE="console"
+    else
+        LAUNCH_MODE="desktop"
+    fi
 fi
 
-# ── 3. Build binaries if missing ──────────────────────────────────────────────
-echo -e "${CYAN}[2/5] Checking binaries...${RESET}"
+# Start optional Go Packet Observer when Go binary or Go toolchain exists
+if [ "${AEGIS_NET:-1}" = "1" ]; then
+    if [ ! -f "target/aegis-network-observer" ] && command -v go &>/dev/null && [ -d "network-observer" ]; then
+        echo -e "${CYAN}[net] Building Go packet observer...${RESET}"
+        mkdir -p target
+        (cd network-observer && go build -o ../target/aegis-network-observer ./cmd/observer) || true
+    fi
+    if [ -f "target/aegis-network-observer" ]; then
+        AEGIS_LOG="${AEGIS_LOG:-info}" ./target/aegis-network-observer > /tmp/aegis-observer.log 2>&1 &
+        OBSERVER_PID=$!
+        echo -e "  ${GREEN}✓${RESET} Go packet observer started (pid $OBSERVER_PID)"
+    fi
+fi
+
+if [ "$LAUNCH_MODE" = "console" ]; then
+    echo -e "${CYAN}[console] Starting Aegis-Guard Web/Console Engine on http://127.0.0.1:3000 ...${RESET}"
+    if [ ! -d "node_modules" ]; then
+        echo -e "${YELLOW}Installing root npm dependencies...${RESET}"
+        npm install --no-audit --no-fund
+    fi
+    if [ -f "dist/index.html" ] && [ "${AEGIS_DEV:-0}" != "1" ]; then
+        NODE_ENV=production npm start
+    else
+        npm run dev
+    fi
+    exit 0
+fi
+
+# Desktop (Tauri v2 + Rust engine) mode
+SOCKET_DIR="/run/aegis"
+if [ "$(uname -s)" = "Linux" ]; then
+    if [ "$EUID" -eq 0 ] || command -v sudo &>/dev/null; then
+        sudo mkdir -p "$SOCKET_DIR" 2>/dev/null || true
+        sudo chmod 1777 "$SOCKET_DIR" 2>/dev/null || true
+    fi
+fi
+
+[ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env" || true
 if [ ! -f "target/release/aegis-process-engine" ]; then
-    echo -e "  ${YELLOW}Building process-engine (first run, ~1-2 min)...${RESET}"
+    echo -e "${CYAN}[1/3] Building Rust process-engine...${RESET}"
     cargo build --release -p process-engine
 fi
-echo -e "  ${GREEN}✓${RESET} process-engine ready"
 
-if [ "${AEGIS_NET:-0}" = "1" ]; then
-    if [ ! -f "target/aegis-network-observer" ]; then
-        if command -v go &>/dev/null; then
-            echo -e "  ${YELLOW}Building network-observer...${RESET}"
-            mkdir -p target
-            (cd network-observer && go build -o ../target/aegis-network-observer ./cmd/observer)
-        else
-            echo -e "  ${YELLOW}⚠ Go not found — skipping network-observer (Go: https://go.dev/dl){RESET}"
-        fi
-    fi
-    [ -f "target/aegis-network-observer" ] && echo -e "  ${GREEN}✓${RESET} network-observer ready"
+if [ -f "target/release/aegis-process-engine" ]; then
+    AEGIS_LOG="${AEGIS_LOG:-info}" AEGIS_SOCKET="$SOCKET_DIR/proc.sock" \
+        ./target/release/aegis-process-engine > /tmp/aegis-engine.log 2>&1 &
+    ENGINE_PID=$!
+    echo -e "  ${GREEN}✓${RESET} Rust process-engine started (pid $ENGINE_PID)"
 fi
 
-# ── 4. Launch background services (root) ──────────────────────────────────────
-echo -e "${CYAN}[3/5] Starting background services...${RESET}"
-echo -e "  ${YELLOW}(sudo password may be requested once){RESET}"
-sudo -v
-
-sudo AEGIS_LOG="${AEGIS_LOG:-info}" AEGIS_SOCKET="$SOCKET_DIR/proc.sock" \
-    ./target/release/aegis-process-engine > /tmp/aegis-engine.log 2>&1 &
-ENGINE_PID=$!
-echo -e "  ${GREEN}✓${RESET} process-engine started (pid $ENGINE_PID)"
-
-if [ "${AEGIS_NET:-0}" = "1" ] && [ -f "target/aegis-network-observer" ]; then
-    sudo AEGIS_LOG="${AEGIS_LOG:-info}" ./target/aegis-network-observer > /tmp/aegis-observer.log 2>&1 &
-    OBSERVER_PID=$!
-    echo -e "  ${GREEN}✓${RESET} network-observer started (pid $OBSERVER_PID)"
-fi
-
-sleep 1
-
-# ── 5. Launch dashboard (foreground) ──────────────────────────────────────────
-echo -e "${CYAN}[4/5] Preparing dashboard...${RESET}"
 cd tauri-app
-
 if [ ! -d "node_modules" ] || [ ! -f "node_modules/.bin/vite" ]; then
-    echo -e "  ${YELLOW}Installing npm packages (first run, ~1 min)...${RESET}"
-    npm install
+    npm install --no-audit --no-fund
 fi
-
 if ! command -v cargo-tauri &>/dev/null; then
-    echo -e "  ${YELLOW}Installing Tauri CLI (first run)...${RESET}"
     cargo install tauri-cli --version "^2.0" --locked
 fi
 
-echo -e "  ${GREEN}✓${RESET} dashboard ready"
-echo ""
-echo -e "${CYAN}[5/5] Launching Aegis-Guard...${RESET}"
-echo ""
-
-AEGIS_SOCKET="$SOCKET_DIR/proc.sock" AEGIS_NET="${AEGIS_NET:-0}" cargo tauri dev
-
-# cleanup() runs automatically via the EXIT trap when the window closes.
+echo -e "${CYAN}[3/3] Launching Aegis-Guard Desktop UI...${RESET}"
+AEGIS_SOCKET="$SOCKET_DIR/proc.sock" AEGIS_NET="${AEGIS_NET:-1}" cargo tauri dev

@@ -1,10 +1,12 @@
 import { useState, useEffect } from "react";
 import { invoke } from "../lib/ipc/core";
+import { useProcessStore } from "../store/processStore";
 import type { DebugEntry, PruneResult, StorageStats } from "../types";
 import RuleBadge from "./RuleBadge";
 
 export default function DebugLogPanel() {
-  const [entries, setEntries] = useState<DebugEntry[]>([]);
+  const { store, dispatch } = useProcessStore();
+  const entries = store.debugLogs;
   const [offset, setOffset] = useState(0);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -17,7 +19,15 @@ export default function DebugLogPanel() {
     try {
       const rows = await invoke<DebugEntry[]>("list_debug_log", { limit: PAGE, offset: off });
       if (Array.isArray(rows)) {
-        setEntries((prev) => (off === 0 ? rows : [...prev, ...rows]));
+        if (off === 0) {
+          dispatch({ type: "SET_DEBUG_LOGS", payload: rows });
+        } else {
+          const existingIds = new Set(store.debugLogs.map((d) => d.id));
+          dispatch({
+            type: "SET_DEBUG_LOGS",
+            payload: [...store.debugLogs, ...rows.filter((r) => !existingIds.has(r.id))],
+          });
+        }
         setOffset(off + rows.length);
       }
       const stats = await invoke<StorageStats>("get_storage_stats");
@@ -29,6 +39,7 @@ export default function DebugLogPanel() {
 
   useEffect(() => {
     load(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function handleQuickPrune() {
@@ -95,7 +106,7 @@ export default function DebugLogPanel() {
             }}
             title="Prune outdated debug logs and temporary files"
           >
-            <span>{isPruning ? "⚡ PRUNING..." : "🧹 PRUNE STALE LOGS"}</span>
+            <span>{isPruning ? "PRUNING…" : "PRUNE STALE LOGS"}</span>
           </button>
           <input
             className="search-input"

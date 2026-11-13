@@ -1,272 +1,242 @@
 #!/usr/bin/env bash
-# installers/install-linux.sh — Aegis-Guard full Linux installer
-# by Vladimir Unknown
-#
-# Detects your distro (with manual override menu), installs the right
-# system packages, builds everything, installs binaries + systemd services,
-# and sets up a double-click launcher that starts BOTH engines
-# (process-engine + network-observer) together with the dashboard.
-#
-# Usage:  bash installers/install-linux.sh
+# installers/install-linux.sh — Aegis-Guard Multi-Distro Linux Console & Desktop Installer
+# Supports both local clone execution and non-interactive `curl | bash` console runs.
+# Usage:
+#   bash installers/install-linux.sh [--console | --desktop] [--yes]
+#   curl -sSL https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/install-linux.sh | sudo bash -s -- --yes
 
-set -e
+set -euo pipefail
 
 VIOLET='\033[35m'; BOLD='\033[1m'; RESET='\033[0m'
 GREEN='\033[32m'; CYAN='\033[36m'; YELLOW='\033[33m'; RED='\033[31m'; DIM='\033[2m'
 
-cd "$(dirname "$0")/.."   # project root
-PROJECT_ROOT="$(pwd)"
+MODE="auto"
+AUTO_YES=0
+for arg in "$@"; do
+    case "$arg" in
+        --console|--web|--headless) MODE="console" ;;
+        --desktop|--gui)            MODE="desktop" ;;
+        -y|--yes)                   AUTO_YES=1 ;;
+    esac
+done
+[ ! -t 0 ] && AUTO_YES=1
 
-clear
 echo -e "${VIOLET}${BOLD}"
-echo "  ╔═══════════════════════════════════════════╗"
-echo "  ║     AEGIS-GUARD  —  LINUX INSTALLER       ║"
-echo "  ║          by Vladimir Unknown              ║"
-echo "  ╚═══════════════════════════════════════════╝"
+echo "  ┌─────────────────────────────────────────────┐"
+echo "  │       AEGIS-GUARD — LINUX INSTALLER         │"
+echo "  │               Version 1.2.0                 │"
+echo "  └─────────────────────────────────────────────┘"
 echo -e "${RESET}"
 
-if [ ! -f "Cargo.toml" ] || [ ! -d "tauri-app" ]; then
-    echo -e "${RED}Error: run this from inside the aegis-guard project (bash installers/install-linux.sh)${RESET}"
-    exit 1
-fi
-
-# ── Environment sanity check ───────────────────────────────────────────────────
-# This installer needs real host access (systemd, /usr/local/bin, /etc,
-# package managers). It cannot work from inside a sandboxed terminal —
-# most commonly, VS Code's integrated terminal when VS Code itself was
-# installed via Flatpak. /.flatpak-info only exists inside a Flatpak sandbox.
 if [ -f "/.flatpak-info" ]; then
-    echo -e "${RED}${BOLD}This terminal is running inside a Flatpak sandbox.${RESET}"
-    echo -e "${YELLOW}That's usually VS Code's built-in terminal when VS Code was installed via Flatpak —"
-    echo -e "the sandbox has no access to sudo, systemd, or /usr/local/bin on the host.${RESET}"
-    echo ""
-    echo -e "${BOLD}Fix:${RESET} open a normal desktop terminal app instead (GNOME Terminal, Konsole,"
-    echo -e "xterm, etc. — from your applications menu, not from inside VS Code) and run:"
-    echo -e "  ${CYAN}cd \"$PROJECT_ROOT\" && bash installers/install-linux.sh${RESET}"
+    echo -e "${RED}${BOLD}Flatpak sandbox detected.${RESET}"
+    echo -e "${YELLOW}Run this installer from a host terminal (GNOME Terminal, Konsole, SSH, or TTY).${RESET}"
     exit 1
 fi
 
-if [ "$EUID" -ne 0 ] && ! command -v sudo &>/dev/null; then
-    echo -e "${RED}${BOLD}No 'sudo' found, and you're not running as root.${RESET}"
-    echo -e "${YELLOW}This installer needs root access to install system packages and services."
-    echo -e "Install sudo first, or run this script as root.${RESET}"
-    exit 1
+SUDO=""
+if [ "$EUID" -ne 0 ]; then
+    if command -v sudo &>/dev/null; then
+        SUDO="sudo"
+    else
+        echo -e "${RED}Error: root privileges or 'sudo' are required.${RESET}"
+        exit 1
+    fi
 fi
 
-# ── Step 1: Detect architecture (informational) ───────────────────────────────
+# Locate repo root or clone cleanly when invoked via `curl | bash`
+SCRIPT_DIR=""
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+
+if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/../package.json" ] && [ -d "$SCRIPT_DIR/../tauri-app" ]; then
+    PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+elif [ -f "./package.json" ] && [ -d "./tauri-app" ]; then
+    PROJECT_ROOT="$(pwd)"
+else
+    PROJECT_ROOT="/opt/aegis-guard"
+    echo -e "${CYAN}[0/6] Cloning Aegis-Guard source to ${PROJECT_ROOT}...${RESET}"
+    if ! command -v git &>/dev/null; then
+        echo -e "${RED}Error: 'git' is required for remote installation.${RESET}"
+        exit 1
+    fi
+    if [ -d "$PROJECT_ROOT/.git" ]; then
+        $SUDO git -C "$PROJECT_ROOT" pull --ff-only || true
+    else
+        $SUDO rm -rf "$PROJECT_ROOT"
+        $SUDO git clone --depth 1 https://github.com/SepJs/aegis-guard.git "$PROJECT_ROOT"
+    fi
+fi
+
+cd "$PROJECT_ROOT"
 ARCH="$(uname -m)"
-echo -e "${CYAN}Detected CPU architecture:${RESET} ${BOLD}${ARCH}${RESET}"
-case "$ARCH" in
-    x86_64)          echo -e "  ${DIM}→ standard 64-bit (Intel/AMD)${RESET}" ;;
-    aarch64|arm64)   echo -e "  ${DIM}→ 64-bit ARM (Raspberry Pi 4/5, ARM servers, etc.)${RESET}" ;;
-    armv7l)          echo -e "  ${DIM}→ 32-bit ARM — build will just take longer${RESET}" ;;
-    *)               echo -e "  ${YELLOW}→ unrecognised — build will still attempt to proceed${RESET}" ;;
-esac
-echo ""
+echo -e "${CYAN}Target Root:${RESET} ${BOLD}${PROJECT_ROOT}${RESET} (${ARCH})"
 
-# ── Step 2: Detect distro, offer override menu ────────────────────────────────
+# Decide desktop vs console mode automatically if "auto"
+if [ "$MODE" = "auto" ]; then
+    if [ -n "${DISPLAY:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
+        MODE="desktop"
+    else
+        MODE="console"
+    fi
+fi
+echo -e "${CYAN}Install Profile:${RESET} ${BOLD}${MODE^^}${RESET}"
+
+# Detect distro
 DETECTED_ID=""; DETECTED_LIKE=""
 if [ -f /etc/os-release ]; then
     . /etc/os-release
     DETECTED_ID="${ID:-}"; DETECTED_LIKE="${ID_LIKE:-}"
 fi
 
-detected_family="unknown"
+family="unknown"
 case "$DETECTED_ID $DETECTED_LIKE" in
-    *ubuntu*|*debian*)          detected_family="debian" ;;
-    *fedora*|*rhel*|*centos*)   detected_family="fedora" ;;
-    *arch*|*manjaro*)           detected_family="arch"   ;;
-    *opensuse*|*suse*)          detected_family="suse"   ;;
-    *alpine*)                   detected_family="alpine" ;;
+    *ubuntu*|*debian*|*pop*|*mint*) family="debian" ;;
+    *fedora*|*rhel*|*centos*|*rocky*) family="fedora" ;;
+    *arch*|*manjaro*|*endeavour*) family="arch" ;;
+    *opensuse*|*suse*) family="suse" ;;
+    *alpine*) family="alpine" ;;
 esac
 
-echo -e "${CYAN}Detected distro:${RESET} ${BOLD}${DETECTED_ID:-unknown}${RESET} ${DIM}(family: $detected_family)${RESET}"
-echo ""
-echo -e "${BOLD}Select package manager to use:${RESET}"
-echo -e "  ${DIM}(Press Enter to use detected)${RESET}"
-echo ""
-echo -e "  ${VIOLET}[1]${RESET} Debian / Ubuntu / Mint / Pop!_OS      (apt)"
-echo -e "  ${VIOLET}[2]${RESET} Fedora / RHEL / CentOS / Rocky        (dnf)"
-echo -e "  ${VIOLET}[3]${RESET} Arch / Manjaro / EndeavourOS          (pacman)"
-echo -e "  ${VIOLET}[4]${RESET} openSUSE                              (zypper)"
-echo -e "  ${VIOLET}[5]${RESET} Alpine                                (apk)"
-echo -e "  ${VIOLET}[6]${RESET} Skip — system packages already installed"
-echo ""
-printf "${BOLD}Choice [1-6, Enter = auto]:${RESET} "
-read -r choice
-
-case "$choice" in
-    1) family="debian" ;; 2) family="fedora" ;; 3) family="arch" ;;
-    4) family="suse"   ;; 5) family="alpine" ;; 6) family="skip" ;;
-    "") family="$detected_family" ;;
-    *) echo -e "${RED}Invalid choice — using detected: $detected_family${RESET}"; family="$detected_family" ;;
-esac
-
-if [ "$family" = "unknown" ]; then
-    echo -e "${YELLOW}Could not detect your distro. Pick a number 1-6 next time, or install these manually:${RESET}"
-    echo -e "${DIM}  webkit2gtk 4.1, gtk3, libappindicator3, librsvg2, openssl-dev, build tools${RESET}"
-    family="skip"
+if [ "$AUTO_YES" -eq 0 ] && [ "$MODE" = "desktop" ]; then
+    echo ""
+    echo -e "${CYAN}Detected distro:${RESET} ${BOLD}${DETECTED_ID:-unknown}${RESET} (${family})"
+    echo -e "  [1] Debian / Ubuntu (apt)   [2] Fedora / RHEL (dnf)"
+    echo -e "  [3] Arch Linux (pacman)     [4] openSUSE (zypper)"
+    echo -e "  [5] Alpine (apk)            [6] Skip OS packages"
+    printf "${BOLD}Choice [Enter = auto]:${RESET} "
+    read -r choice || choice=""
+    case "$choice" in
+        1) family="debian" ;; 2) family="fedora" ;; 3) family="arch" ;;
+        4) family="suse" ;; 5) family="alpine" ;; 6) family="skip" ;;
+    esac
 fi
 
-# ── Step 3: Install system dependencies for the chosen family ─────────────────
-echo ""
-echo -e "${CYAN}[1/6] Installing system dependencies (${family})...${RESET}"
-
+echo -e "${CYAN}[1/6] Installing system prerequisites (${family}, mode=${MODE})...${RESET}"
 case "$family" in
     debian)
-        sudo apt-get update -q
-        sudo apt-get install -y -q \
-            build-essential curl git pkg-config \
-            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
-            librsvg2-dev libssl-dev patchelf \
-            --fix-missing
+        $SUDO apt-get update -qq
+        if [ "$MODE" = "desktop" ]; then
+            $SUDO apt-get install -y -qq build-essential curl git pkg-config \
+                libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+                librsvg2-dev libssl-dev patchelf || true
+        else
+            $SUDO apt-get install -y -qq build-essential curl git pkg-config libssl-dev || true
+        fi
         ;;
     fedora)
-        sudo dnf install -y \
-            gcc gcc-c++ make curl git pkgconf-pkg-config \
-            webkit2gtk4.1-devel gtk3-devel libappindicator-gtk3-devel \
-            librsvg2-devel openssl-devel
+        if [ "$MODE" = "desktop" ]; then
+            $SUDO dnf install -y gcc gcc-c++ make curl git pkgconf-pkg-config \
+                webkit2gtk4.1-devel gtk3-devel libappindicator-gtk3-devel librsvg2-devel openssl-devel || true
+        else
+            $SUDO dnf install -y gcc gcc-c++ make curl git pkgconf-pkg-config openssl-devel || true
+        fi
         ;;
     arch)
-        sudo pacman -Sy --noconfirm --needed \
-            base-devel curl git pkgconf \
-            webkit2gtk-4.1 gtk3 libappindicator-gtk3 \
-            librsvg openssl
+        if [ "$MODE" = "desktop" ]; then
+            $SUDO pacman -Sy --noconfirm --needed base-devel curl git pkgconf \
+                webkit2gtk-4.1 gtk3 libappindicator-gtk3 librsvg openssl || true
+        else
+            $SUDO pacman -Sy --noconfirm --needed base-devel curl git pkgconf openssl || true
+        fi
         ;;
     suse)
-        sudo zypper install -y \
-            curl git pkg-config gcc gcc-c++ make \
-            webkit2gtk3-devel gtk3-devel libappindicator3-devel \
-            librsvg-devel libopenssl-devel
+        $SUDO zypper install -y curl git pkg-config gcc gcc-c++ make openssl-devel || true
         ;;
     alpine)
-        sudo apk add --no-cache \
-            build-base curl git pkgconf \
-            webkit2gtk-dev gtk+3.0-dev libappindicator-dev \
-            librsvg-dev openssl-dev
+        $SUDO apk add --no-cache build-base curl git pkgconf openssl-dev || true
         ;;
-    skip)
-        echo -e "  ${YELLOW}Skipped — assuming system packages are already present.${RESET}"
+    *)
+        echo -e "  ${YELLOW}Skipping OS package installation.${RESET}"
         ;;
 esac
 echo -e "  ${GREEN}✓${RESET} system dependencies ready"
 
-# ── Step 4: Rust / Node / Go toolchains ────────────────────────────────────────
-echo -e "${CYAN}[2/6] Checking toolchains...${RESET}"
-source "$HOME/.cargo/env" 2>/dev/null || true
-
-if ! command -v cargo &>/dev/null; then
-    echo -e "  ${YELLOW}Installing Rust...${RESET}"
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-    source "$HOME/.cargo/env"
-fi
-echo -e "  ${GREEN}✓${RESET} Rust: $(rustc --version)"
-
+echo -e "${CYAN}[2/6] Checking Node.js, Rust, and Go toolchains...${RESET}"
 if ! command -v node &>/dev/null; then
-    echo -e "  ${RED}Node.js not found. Install it (e.g. https://nodejs.org) then re-run this script.${RESET}"
+    echo -e "${RED}Node.js 20+ not found. Please install Node.js first (https://nodejs.org).${RESET}"
     exit 1
 fi
 echo -e "  ${GREEN}✓${RESET} Node: $(node --version)"
+
+[ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env" || true
+HAVE_CARGO=0
+if command -v cargo &>/dev/null; then
+    HAVE_CARGO=1
+    echo -e "  ${GREEN}✓${RESET} Rust: $(rustc --version)"
+elif [ "$MODE" = "desktop" ]; then
+    echo -e "  ${YELLOW}Installing Rust toolchain via rustup...${RESET}"
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    [ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"
+    command -v cargo &>/dev/null && HAVE_CARGO=1
+else
+    echo -e "  ${YELLOW}Rust not found — console mode will run Node/Express kernel telemetry + Go observer if available.${RESET}"
+fi
 
 HAVE_GO=0
 if command -v go &>/dev/null; then
     HAVE_GO=1
     echo -e "  ${GREEN}✓${RESET} Go: $(go version | awk '{print $3}')"
 else
-    echo -e "  ${YELLOW}⚠ Go not found — network-observer will be skipped (install: https://go.dev/dl)${RESET}"
+    echo -e "  ${YELLOW}Go not found — Go packet bridge optional (kernel /proc/net/snmp inspector stays active).${RESET}"
 fi
 
-# ── Step 5: Build everything ───────────────────────────────────────────────────
-# Frontend MUST be built before any cargo build touches aegis-tauri, since
-# Tauri's build.rs embeds the frontendDist ("../dist") into the binary at
-# compile time — building Rust first would bake in a missing/stale frontend.
-echo -e "${CYAN}[3/6] Building dashboard frontend...${RESET}"
-(cd tauri-app && npm install && npm run build)
-echo -e "  ${GREEN}✓${RESET} frontend built"
+echo -e "${CYAN}[3/6] Installing npm dependencies & building dashboard assets...${RESET}"
+npm install --no-audit --no-fund
+npm run build
+echo -e "  ${GREEN}✓${RESET} dashboard frontend built"
 
-echo -e "${CYAN}[4/6] Building Rust workspace (release, ${ARCH})...${RESET}"
-# Force a fresh compile of aegis-tauri specifically. Cargo's incremental
-# caching only looks at Rust source file changes — it won't notice that
-# the embedded frontend (dist/) is newer, so a stale binary from an earlier
-# build could otherwise be reused as-is.
-cargo clean --release -p aegis-tauri 2>/dev/null || true
-
-# Build process-engine, active-defense, and the other Linux-only crates
-# with a plain cargo build first...
-cargo build --release --workspace --exclude aegis-tauri
-
-# ...then build the dashboard specifically through the official Tauri CLI
-# (`cargo tauri build`), not a raw `cargo build`. A raw `cargo build` alone
-# does not reliably set the environment Tauri needs at compile time to embed
-# and load the production frontend from disk instead of trying to reach a
-# `localhost:1420` dev server that isn't running — which is exactly the
-# "Could not connect to localhost" white-screen symptom. `--bundles appimage`
-# is used only because some tauri-cli versions reject `--bundles none`; the
-# plain binary this produces at target/release/aegis-tauri is what we
-# actually install — the AppImage itself is discarded.
-if ! command -v cargo-tauri &>/dev/null; then
-    echo -e "  ${YELLOW}Installing Tauri CLI (needed once for a correct production build)...${RESET}"
-    cargo install tauri-cli --version "^2.0" --locked
-fi
-(cd tauri-app && cargo tauri build --bundles appimage)
-echo -e "  ${GREEN}✓${RESET} Rust build complete"
-
-# tauri-app/src-tauri is a workspace member, so its output binary lands in
-# the shared workspace target/ directory at the project root — NOT in a
-# separate tauri-app/src-tauri/target/.
-DASH_BIN="$PROJECT_ROOT/target/release/aegis-tauri"
-if [ ! -f "$DASH_BIN" ]; then
-    echo -e "${RED}Could not find built dashboard binary at $DASH_BIN${RESET}"
-    exit 1
+if [ "$HAVE_CARGO" -eq 1 ]; then
+    echo -e "${CYAN}[4/6] Building native Rust engine (aegis-process-engine)...${RESET}"
+    cargo build --release -p process-engine
+    if [ "$MODE" = "desktop" ]; then
+        if ! command -v cargo-tauri &>/dev/null; then
+            cargo install tauri-cli --version "^2.0" --locked || true
+        fi
+        cargo clean --release -p aegis-guard 2>/dev/null || true
+        (cd tauri-app && cargo tauri build --bundles appimage) || cargo build --release -p aegis-guard || true
+    fi
+    echo -e "  ${GREEN}✓${RESET} Rust components built"
+else
+    echo -e "${CYAN}[4/6] Skipping native Rust binary build (console telemetry mode).${RESET}"
 fi
 
-# Sanity check: a production binary should NOT reference the Vite dev
-# server URL as a runtime target. If it does, something in the build
-# picked up dev-mode config again — fail loudly here instead of installing
-# a broken binary and discovering it only after opening the app.
-if strings "$DASH_BIN" 2>/dev/null | grep -q "localhost:1420"; then
-    echo -e "${RED}${BOLD}Warning: the built binary still references localhost:1420 (dev server).${RESET}"
-    echo -e "${YELLOW}This usually means it will show a blank white window. Continuing install,"
-    echo -e "but if the app is blank, please report this with the build log above.${RESET}"
-fi
-
-if [ "$HAVE_GO" = "1" ]; then
-    echo -e "${CYAN}[5/6] Building network-observer...${RESET}"
+if [ "$HAVE_GO" -eq 1 ] && [ -d "network-observer" ]; then
+    echo -e "${CYAN}[5/6] Building Go network packet observer...${RESET}"
     mkdir -p target
     (cd network-observer && go build -o ../target/aegis-network-observer ./cmd/observer)
     echo -e "  ${GREEN}✓${RESET} network-observer built"
+else
+    echo -e "${CYAN}[5/6] Skipping Go binary build.${RESET}"
 fi
 
-# ── Step 6: System install (binaries, tmpfiles, systemd, launcher) ────────────
-echo -e "${CYAN}[6/6] Installing system-wide...${RESET}"
+echo -e "${CYAN}[6/6] Installing binaries, data paths & console CLI (${PROJECT_ROOT})...${RESET}"
+$SUDO install -d -m 750 /var/lib/aegis
+$SUDO install -d -m 1777 /var/lib/aegis/quarantine /var/lib/aegis/canaries /tmp/aegis_guard_data
 
-sudo install -m 755 target/release/aegis-process-engine /usr/local/bin/
-[ -f target/aegis-network-observer ] && sudo install -m 755 target/aegis-network-observer /usr/local/bin/
-sudo install -m 755 "$DASH_BIN" /usr/local/bin/aegis-guard-dashboard
+[ -f target/release/aegis-process-engine ] && $SUDO install -m 755 target/release/aegis-process-engine /usr/local/bin/
+[ -f target/aegis-network-observer ] && $SUDO install -m 755 target/aegis-network-observer /usr/local/bin/
+[ -f target/release/Aegis-Guard ] && $SUDO install -m 755 target/release/Aegis-Guard /usr/local/bin/aegis-guard-desktop
 
-sudo install -d -m 750  /var/lib/aegis
-# quarantine + canary token storage are both written by the DASHBOARD
-# process (Kill/Quarantine/Whitelist and canary creation are Tauri commands
-# that run as the normal desktop user, not by the root-run engine) — same
-# sticky + world-writable pattern as /run/aegis, for the same reason.
-sudo install -d -m 1777 /var/lib/aegis/quarantine /var/lib/aegis/canaries
-# install -d only sets the mode when *creating* a directory — if either of
-# these already exists from a previous run of this script, force the
-# permission fix explicitly too.
-sudo chmod 1777 /var/lib/aegis/quarantine /var/lib/aegis/canaries
+# Always install reliable CLI command `aegis-guard`
+$SUDO tee /usr/local/bin/aegis-guard > /dev/null << CLI_EOF
+#!/usr/bin/env bash
+cd "$PROJECT_ROOT"
+exec bash "$PROJECT_ROOT/aegis.sh" "\$@"
+CLI_EOF
+$SUDO chmod 755 /usr/local/bin/aegis-guard
 
-# /run is a tmpfs and is wiped on every reboot — a tmpfiles.d rule is the
-# correct, persistent way to recreate /run/aegis with the right permissions
-# on every boot (sticky + world-writable, like /tmp, so the non-root
-# dashboard can bind the socket while the root-run engine connects to it).
-sudo tee /etc/tmpfiles.d/aegis-guard.conf > /dev/null << 'TMPFILES'
+if command -v systemctl &>/dev/null && [ -d /etc/systemd/system ]; then
+    $SUDO tee /etc/tmpfiles.d/aegis-guard.conf > /dev/null << 'TMPFILES'
 d /run/aegis 1777 root root -
 TMPFILES
-sudo systemd-tmpfiles --create /etc/tmpfiles.d/aegis-guard.conf
+    $SUDO systemd-tmpfiles --create /etc/tmpfiles.d/aegis-guard.conf 2>/dev/null || true
 
-sudo tee /etc/systemd/system/aegis-process-engine.service > /dev/null << 'UNIT'
+    if [ -f /usr/local/bin/aegis-process-engine ]; then
+        $SUDO tee /etc/systemd/system/aegis-process-engine.service > /dev/null << 'UNIT'
 [Unit]
-Description=Aegis-Guard Process Engine — by Vladimir Unknown
+Description=Aegis-Guard Process Engine
 After=network.target
 [Service]
 Type=simple
@@ -279,11 +249,12 @@ User=root
 [Install]
 WantedBy=multi-user.target
 UNIT
+    fi
 
-if [ -f /usr/local/bin/aegis-network-observer ]; then
-sudo tee /etc/systemd/system/aegis-network-observer.service > /dev/null << 'UNIT'
+    if [ -f /usr/local/bin/aegis-network-observer ]; then
+        $SUDO tee /etc/systemd/system/aegis-network-observer.service > /dev/null << 'UNIT'
 [Unit]
-Description=Aegis-Guard Network Observer — by Vladimir Unknown
+Description=Aegis-Guard Network Observer
 After=network.target aegis-process-engine.service
 [Service]
 Type=simple
@@ -295,70 +266,32 @@ User=root
 [Install]
 WantedBy=multi-user.target
 UNIT
+    fi
+    $SUDO systemctl daemon-reload 2>/dev/null || true
 fi
-sudo systemctl daemon-reload
 
-# Narrowly-scoped passwordless sudo: this user may only start/stop the two
-# named Aegis-Guard services — nothing else. This is what lets clicking the
-# desktop icon start both engines without a password prompt every time.
-SUDOERS_FILE="/etc/sudoers.d/aegis-guard"
-{
-  echo "$(whoami) ALL=(root) NOPASSWD: /usr/bin/systemctl start aegis-process-engine"
-  echo "$(whoami) ALL=(root) NOPASSWD: /usr/bin/systemctl stop aegis-process-engine"
-  echo "$(whoami) ALL=(root) NOPASSWD: /usr/bin/systemctl start aegis-network-observer"
-  echo "$(whoami) ALL=(root) NOPASSWD: /usr/bin/systemctl stop aegis-network-observer"
-} | sudo tee "$SUDOERS_FILE" > /dev/null
-sudo chmod 440 "$SUDOERS_FILE"
-sudo visudo -c -f "$SUDOERS_FILE" > /dev/null || { echo -e "${RED}sudoers syntax check failed — removing.${RESET}"; sudo rm -f "$SUDOERS_FILE"; }
-echo -e "  ${GREEN}✓${RESET} passwordless start/stop configured (scoped to Aegis-Guard services only)"
-
-# Launcher: starts BOTH engines via systemd + dashboard together, and stops
-# the engines again when the dashboard window closes.
-sudo tee /usr/local/bin/aegis-guard-launch > /dev/null << 'LAUNCH_EOF'
-#!/usr/bin/env bash
-set -e
-
-cleanup() {
-    sudo -n systemctl stop aegis-process-engine    2>/dev/null || true
-    sudo -n systemctl stop aegis-network-observer  2>/dev/null || true
-}
-trap cleanup EXIT INT TERM
-
-sudo -n systemctl start aegis-process-engine
-[ -f /etc/systemd/system/aegis-network-observer.service ] && \
-    sudo -n systemctl start aegis-network-observer
-
-sleep 1
-AEGIS_NET=1 /usr/local/bin/aegis-guard-dashboard
-LAUNCH_EOF
-sudo chmod +x /usr/local/bin/aegis-guard-launch
-echo -e "  ${GREEN}✓${RESET} combined launcher installed"
-
-# Desktop icon
-mkdir -p "$HOME/.local/share/applications" "$HOME/.local/share/icons"
-cp tauri-app/src-tauri/icons/icon.png "$HOME/.local/share/icons/aegis-guard.png"
-cat > "$HOME/.local/share/applications/aegis-guard.desktop" << DESK
+if [ "$MODE" = "desktop" ] && [ -f /usr/local/bin/aegis-guard-desktop ]; then
+    mkdir -p "$HOME/.local/share/applications" "$HOME/.local/share/icons"
+    [ -f tauri-app/src-tauri/icons/icon.png ] && cp tauri-app/src-tauri/icons/icon.png "$HOME/.local/share/icons/aegis-guard.png"
+    cat > "$HOME/.local/share/applications/aegis-guard.desktop" << DESK
 [Desktop Entry]
 Type=Application
 Name=Aegis-Guard
-Comment=Endpoint Security Suite — Process Engine + Network Observer + Dashboard
-Exec=/usr/local/bin/aegis-guard-launch
+Comment=Endpoint Security & Network IDS Suite
+Exec=/usr/local/bin/aegis-guard-desktop
 Icon=$HOME/.local/share/icons/aegis-guard.png
 Terminal=false
 Categories=System;Security;
 DESK
-chmod +x "$HOME/.local/share/applications/aegis-guard.desktop"
-update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
-echo -e "  ${GREEN}✓${RESET} desktop launcher installed"
+    chmod +x "$HOME/.local/share/applications/aegis-guard.desktop"
+    update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
+fi
 
 echo ""
-echo -e "${GREEN}${BOLD}━━━ Installation Complete ━━━${RESET}"
+echo -e "${GREEN}${BOLD}━━━ Aegis-Guard v1.2.0 Installation Complete ━━━${RESET}"
+echo -e "  Console mode (any terminal): ${CYAN}aegis-guard --console${RESET}  (http://127.0.0.1:3000)"
+if [ -f /usr/local/bin/aegis-guard-desktop ]; then
+    echo -e "  Desktop UI:                  ${CYAN}aegis-guard --desktop${RESET}"
+fi
+echo -e "  Uninstall:                   ${DIM}sudo bash ${PROJECT_ROOT}/installers/uninstall-linux.sh${RESET}"
 echo ""
-echo -e "  ${BOLD}Find 'Aegis-Guard' in your applications menu${RESET} — one click"
-echo -e "  starts the process engine, network observer, and dashboard together,"
-echo -e "  and stops the engines again when you close the window."
-echo ""
-echo -e "  ${DIM}Or from a terminal:${RESET} aegis-guard-launch"
-echo -e "  ${DIM}To uninstall:${RESET} bash installers/uninstall-linux.sh"
-echo ""
-echo -e "${VIOLET}${BOLD}Aegis-Guard — by Vladimir Unknown${RESET}"

@@ -3,13 +3,17 @@ use std::fs;
 use crate::models::{AnomalyDetail, Confidence, ProcInfo};
 
 const FORBIDDEN_EXEC_DIRS: &[&str] = &[
-    "/tmp", "/var/tmp", "/dev/shm",
+    "/tmp/", "/var/tmp/", "/dev/shm/",
     "\\AppData\\Local\\Temp", "\\Windows\\Temp", "\\Users\\Public",
     "/appdata/local/temp", "/windows/temp", "/users/public"
 ];
+const SAFE_DOT_SEGMENTS: &[&str] = &[
+    ".venv", ".nvm", ".cargo", ".npm", ".local", ".cache", ".rustup",
+    ".vscode-server", ".config", ".pyenv", ".pnpm", ".bun", ".yarn",
+];
 const OBFUSCATION_PATTERNS: &[&str] = &[
-    "base64","eval","exec(","IEX(","fromCharCode","/dev/stdin","/dev/tcp/","/dev/udp/",
-    ">${IFS}","${IFS}","\\x","downloadstring","invoke-expression","bypass -enc","hidden -enc"
+    "base64 -d", "base64 --decode", "eval($_", "iex(", "fromcharcode", "/dev/tcp/", "/dev/udp/",
+    ">${ifs}", "${ifs}", "downloadstring", "invoke-expression", "bypass -enc", "hidden -enc"
 ];
 
 pub struct PathRuleEngine;
@@ -21,10 +25,8 @@ impl PathRuleEngine {
         let ancestors = self.build_ancestors(proc.ppid, known);
         if let Some(d) = self.path_001(proc, &ancestors) { return Some(d); }
         if let Some(d) = self.path_002(proc, &ancestors) { return Some(d); }
-        if let Some(d) = self.path_003(proc, &ancestors) { return Some(d); }
         if let Some(d) = self.path_004(proc, &ancestors) { return Some(d); }
         if let Some(d) = self.arg_001(proc, &ancestors)  { return Some(d); }
-        if let Some(d) = self.arg_002(proc, &ancestors)  { return Some(d); }
         if let Some(d) = self.arg_003(proc, &ancestors)  { return Some(d); }
         if let Some(d) = self.env_001(proc, &ancestors)  { return Some(d); }
         if let Some(d) = self.env_002(proc, &ancestors)  { return Some(d); }
@@ -33,10 +35,18 @@ impl PathRuleEngine {
 
     fn path_001(&self, proc: &ProcInfo, ancestors: &[u32]) -> Option<AnomalyDetail> {
         let exe = proc.exe.as_deref()?;
+        let name_lower = proc.name.to_lowercase();
+        if matches!(name_lower.as_str(), "node"|"tsx"|"vite"|"npm"|"npx"|"cargo"|"go"|"pip"|"pip3"|"esbuild"|"rustc"|"gcc") {
+            return None;
+        }
         let dir = FORBIDDEN_EXEC_DIRS.iter().find(|&&d| exe.starts_with(d))?;
+        let in_shm = *dir == "/dev/shm/";
         Some(AnomalyDetail {
-            rule: "PATH-001".into(), confidence: Confidence::High,
-            reason: format!("Process '{}' (pid {}) is executing from '{}', a world-writable temporary directory. Legitimate software is never installed here — this is a strong indicator of a dropper, fileless malware stage, or exploitation artifact.", proc.name, proc.pid, dir),
+            rule: "PATH-001".into(),
+            confidence: if in_shm { Confidence::High } else { Confidence::Low },
+            priority_tier: if in_shm { "P2".into() } else { "P4".into() },
+            risk_score: if in_shm { 76 } else { 32 },
+            reason: format!("Process '{}' (pid {}) is executing from '{}', a writable temporary directory.", proc.name, proc.pid, dir),
             parent_exe: None, ancestors: ancestors.to_vec(),
         })
     }
@@ -46,56 +56,42 @@ impl PathRuleEngine {
         if !exe.starts_with("/proc/") || !exe.contains("/fd/") { return None; }
         Some(AnomalyDetail {
             rule: "PATH-002".into(), confidence: Confidence::High,
-            reason: format!("Process '{}' (pid {}) appears to be executing from '{}'. This matches the memfd_create() fileless execution technique.", proc.name, proc.pid, exe),
-            parent_exe: None, ancestors: ancestors.to_vec(),
-        })
-    }
-
-    fn path_003(&self, proc: &ProcInfo, ancestors: &[u32]) -> Option<AnomalyDetail> {
-        let cwd = proc.cwd.as_deref()?;
-        let exe = proc.exe.as_deref().unwrap_or("");
-        if FORBIDDEN_EXEC_DIRS.iter().any(|&d| exe.starts_with(d)) { return None; }
-        if !FORBIDDEN_EXEC_DIRS.iter().any(|&d| cwd.starts_with(d)) { return None; }
-        Some(AnomalyDetail {
-            rule: "PATH-003".into(), confidence: Confidence::Medium,
-            reason: format!("Process '{}' (pid {}) has its working directory set to '{}'. Legitimate daemons rarely use temp directories as CWD.", proc.name, proc.pid, cwd),
+            priority_tier: "P2".into(), risk_score: 84,
+            reason: format!("Process '{}' (pid {}) appears to be executing from '{}'. Matches memfd_create() execution.", proc.name, proc.pid, exe),
             parent_exe: None, ancestors: ancestors.to_vec(),
         })
     }
 
     fn path_004(&self, proc: &ProcInfo, ancestors: &[u32]) -> Option<AnomalyDetail> {
         let exe = proc.exe.as_deref()?;
-        let suspicious = exe.contains("/../") || exe.contains("/./")
-            || exe.split('/').any(|seg| seg.starts_with('.') && seg.len() > 1);
-        if !suspicious { return None; }
+        let has_traversal = exe.contains("/../") || exe.contains("/./");
+        let hidden_in_tmp = FORBIDDEN_EXEC_DIRS.iter().any(|&d| exe.starts_with(d))
+            && exe.split('/').any(|seg| seg.starts_with('.') && seg.len() > 1 && !SAFE_DOT_SEGMENTS.contains(&seg));
+        if !has_traversal && !hidden_in_tmp { return None; }
         Some(AnomalyDetail {
             rule: "PATH-004".into(), confidence: Confidence::Medium,
-            reason: format!("Process '{}' (pid {}) is executing from an unusual path '{}' containing path traversal or hidden directories.", proc.name, proc.pid, exe),
+            priority_tier: "P3".into(), risk_score: 52,
+            reason: format!("Process '{}' (pid {}) path '{}' contains traversal or hidden temp segment.", proc.name, proc.pid, exe),
             parent_exe: None, ancestors: ancestors.to_vec(),
         })
     }
 
     fn arg_001(&self, proc: &ProcInfo, ancestors: &[u32]) -> Option<AnomalyDetail> {
         if proc.cmdline.is_empty() { return None; }
+        let name_lower = proc.name.to_lowercase();
         let full_cmd = proc.cmdline.join(" ");
         let lower = full_cmd.to_lowercase();
+        let critical_pipe = lower.contains("/dev/tcp/") || lower.contains("/dev/udp/");
+        if !critical_pipe && matches!(name_lower.as_str(), "node"|"vite"|"tsx"|"esbuild"|"webpack"|"vitest"|"jest"|"tsc") {
+            return None;
+        }
         let hit = OBFUSCATION_PATTERNS.iter().find(|&&pat| lower.contains(pat))?;
         Some(AnomalyDetail {
-            rule: "ARG-001".into(), confidence: Confidence::High,
-            reason: format!("Process '{}' (pid {}) has obfuscation indicator '{}' in its command-line: `{}`.", proc.name, proc.pid, hit, truncate(&full_cmd, 120)),
-            parent_exe: None, ancestors: ancestors.to_vec(),
-        })
-    }
-
-    fn arg_002(&self, proc: &ProcInfo, ancestors: &[u32]) -> Option<AnomalyDetail> {
-        if proc.cmdline.len() < 3 { return None; }
-        let is_shell = matches!(proc.name.as_str(), "bash"|"sh"|"dash"|"zsh"|"fish"|"ksh");
-        if !is_shell || proc.cmdline[1] != "-c" { return None; }
-        let script = &proc.cmdline[2];
-        if script.len() < 256 { return None; }
-        Some(AnomalyDetail {
-            rule: "ARG-002".into(), confidence: Confidence::Medium,
-            reason: format!("Shell '{}' (pid {}) launched with '-c' and a {}-character inline script. Preview: `{}`", proc.name, proc.pid, script.len(), truncate(script, 80)),
+            rule: "ARG-001".into(),
+            confidence: if critical_pipe { Confidence::High } else { Confidence::Low },
+            priority_tier: if critical_pipe { "P1".into() } else { "P3".into() },
+            risk_score: if critical_pipe { 92 } else { 42 },
+            reason: format!("Process '{}' (pid {}) has command-line indicator '{}': `{}`.", proc.name, proc.pid, hit, truncate(&full_cmd, 120)),
             parent_exe: None, ancestors: ancestors.to_vec(),
         })
     }
@@ -106,21 +102,12 @@ impl PathRuleEngine {
         if argv0.trim().is_empty() && !argv0.is_empty() {
             return Some(AnomalyDetail {
                 rule: "ARG-003".into(), confidence: Confidence::Medium,
-                reason: format!("Process '{}' (pid {}) has argv[0] consisting entirely of whitespace — a name-hiding technique.", proc.name, proc.pid),
+                priority_tier: "P3".into(), risk_score: 56,
+                reason: format!("Process '{}' (pid {}) has whitespace-only argv[0].", proc.name, proc.pid),
                 parent_exe: None, ancestors: ancestors.to_vec(),
             });
         }
-        let argv0_base = argv0.split('/').next_back().unwrap_or(argv0);
-        let comm_lower = proc.name.to_lowercase();
-        let arg0_lower = argv0_base.to_lowercase();
-        let names_match = comm_lower.contains(&arg0_lower) || arg0_lower.contains(&comm_lower)
-            || comm_lower.starts_with(&arg0_lower[..arg0_lower.len().min(4)]);
-        if names_match || argv0.starts_with('-') || argv0.len() <= 2 { return None; }
-        Some(AnomalyDetail {
-            rule: "ARG-003".into(), confidence: Confidence::Low,
-            reason: format!("Process comm name '{}' (pid {}) does not match argv[0] '{}'. May indicate process masquerading.", proc.name, proc.pid, argv0_base),
-            parent_exe: None, ancestors: ancestors.to_vec(),
-        })
+        None
     }
 
     fn env_001(&self, proc: &ProcInfo, ancestors: &[u32]) -> Option<AnomalyDetail> {
@@ -130,7 +117,8 @@ impl PathRuleEngine {
         if value.is_empty() { return None; }
         Some(AnomalyDetail {
             rule: "ENV-001".into(), confidence: Confidence::High,
-            reason: format!("Process '{}' (pid {}) has LD_PRELOAD set to '{}'. This forces the dynamic linker to load an attacker library into every spawned process.", proc.name, proc.pid, truncate(value, 80)),
+            priority_tier: "P2".into(), risk_score: 80,
+            reason: format!("Process '{}' (pid {}) has LD_PRELOAD set to '{}'.", proc.name, proc.pid, truncate(value, 80)),
             parent_exe: None, ancestors: ancestors.to_vec(),
         })
     }
@@ -145,7 +133,8 @@ impl PathRuleEngine {
         if bad.is_empty() { return None; }
         Some(AnomalyDetail {
             rule: "ENV-002".into(), confidence: Confidence::Medium,
-            reason: format!("Process '{}' (pid {}) has suspicious segments in PATH: {:?}. Enables command hijacking via writable temp dirs.", proc.name, proc.pid, bad),
+            priority_tier: "P3".into(), risk_score: 45,
+            reason: format!("Process '{}' (pid {}) has writable segments in PATH: {:?}.", proc.name, proc.pid, bad),
             parent_exe: None, ancestors: ancestors.to_vec(),
         })
     }

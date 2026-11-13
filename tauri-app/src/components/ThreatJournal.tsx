@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "../lib/ipc/core";
-import { listen } from "../lib/ipc/event";
+import { useProcessStore } from "../store/processStore";
 import type { ThreatIncident, Severity } from "../types";
 import ConfidenceBadge from "./ConfidenceBadge";
 import RuleBadge from "./RuleBadge";
@@ -9,7 +9,8 @@ type Cat = "all" | "PAR" | "PATH" | "ARG" | "ENV" | "C2";
 const PAGE = 50;
 
 export default function ThreatJournal() {
-  const [incidents, setIncidents] = useState<ThreatIncident[]>([]);
+  const { store, dispatch } = useProcessStore();
+  const incidents = store.incidents;
   const [offset, setOffset] = useState(0);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [cat, setCat] = useState<Cat>("all");
@@ -20,28 +21,30 @@ export default function ThreatJournal() {
     try {
       const rows = await invoke<ThreatIncident[]>("list_incidents", { limit: PAGE, offset: off });
       if (Array.isArray(rows)) {
-        setIncidents((prev) => (off === 0 ? rows : [...prev, ...rows]));
+        if (off === 0) {
+          dispatch({ type: "SET_INCIDENTS", payload: rows });
+        } else {
+          const existingIds = new Set(store.incidents.map((i) => i.id));
+          dispatch({
+            type: "SET_INCIDENTS",
+            payload: [...store.incidents, ...rows.filter((r) => !existingIds.has(r.id))],
+          });
+        }
         setOffset(off + rows.length);
       }
     } catch (err) {
       console.error("Failed to load incidents:", err);
     }
-  }, []);
+  }, [dispatch, store.incidents]);
 
   useEffect(() => {
     load(0);
-  }, [load]);
-
-  useEffect(() => {
-    const unlistenPromise = listen("anomaly", () => load(0));
-    return () => {
-      unlistenPromise.then((unlisten) => unlisten());
-    };
-  }, [load]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function resolve(id: string) {
     await invoke("resolve_incident", { id });
-    setIncidents((prev) => prev.map((i) => (i.id === id ? { ...i, resolved: true } : i)));
+    dispatch({ type: "RESOLVE_INCIDENT", payload: id });
   }
 
   async function doExport(fmt: "markdown" | "json") {
@@ -78,7 +81,7 @@ export default function ThreatJournal() {
   return (
     <div className="panel">
       <div className="panel-header">
-        <span className="panel-title">THREAT JOURNAL2 & INCIDENTS</span>
+        <span className="panel-title">THREAT JOURNAL &amp; INCIDENTS</span>
         {open.length > 0 && <span className="pstat pstat--warn">{open.length} ACTIVE INCIDENTS</span>}
         <span className="pstat">MULTI-TIER EVALUATED</span>
         <div className="toolbar-right">
@@ -280,7 +283,7 @@ function IncCard({
               }}
             >
               <span style={{ fontSize: 10, fontWeight: 700, color: "var(--redl)" }}>
-                ⚡ MALWARE SIGNATURE: {inc.virus_name}
+                MALWARE SIGNATURE: {inc.virus_name}
               </span>
               <span
                 style={{

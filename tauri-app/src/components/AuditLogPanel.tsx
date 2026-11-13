@@ -1,16 +1,23 @@
 import { useState, useEffect } from "react";
 import { invoke } from "../lib/ipc/core";
-
-interface AuditEntry { id: string; action: string; pid: number; process: string; incident_id: string | null; note: string; status: string; outcome: string | null; ts_before: number; ts_after: number | null; prev_digest: string; digest: string }
+import { useProcessStore } from "../store/processStore";
+import type { AuditEntry } from "../types";
 
 export default function AuditLogPanel() {
-  const [entries, setEntries] = useState<AuditEntry[]>([]);
+  const { store, dispatch } = useProcessStore();
+  const entries = store.auditLogs;
   const [chainOk, setChainOk] = useState<boolean | null>(null);
   const [chainErrs, setChainErrs] = useState<string[]>([]);
   const [verifying, setVerifying] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  useEffect(() => { invoke<AuditEntry[]>("list_audit_log", { limit: 100, offset: 0 }).then(setEntries).catch(console.error); }, []);
+  useEffect(() => {
+    invoke<AuditEntry[]>("list_audit_log", { limit: 100, offset: 0 })
+      .then((rows) => {
+        if (Array.isArray(rows)) dispatch({ type: "SET_AUDIT_LOGS", payload: rows });
+      })
+      .catch(console.error);
+  }, [dispatch]);
 
   async function verifyChain() {
     setVerifying(true);

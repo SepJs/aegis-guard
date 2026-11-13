@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/SepJs/aegis-guard/network-observer/internal/inspector"
 	"github.com/SepJs/aegis-guard/network-observer/internal/rules"
 )
 
@@ -29,9 +30,22 @@ type NetEvent struct {
 	BytesTX uint64; BytesRX uint64; Alert *rules.NetAlert; TsMs int64
 }
 
-type Monitor struct { rules *rules.NetRuleEngine; events chan<- NetEvent; known map[uint64]ProcessConn; mu sync.Mutex }
+type Monitor struct {
+	rules     *rules.NetRuleEngine
+	inspector *inspector.PacketInspector
+	events    chan<- NetEvent
+	known     map[uint64]ProcessConn
+	mu        sync.Mutex
+}
 
-func New(ch chan<- NetEvent) *Monitor { return &Monitor{rules: rules.New(), events: ch, known: make(map[uint64]ProcessConn)} }
+func New(ch chan<- NetEvent, insp *inspector.PacketInspector) *Monitor {
+	return &Monitor{
+		rules:     rules.New(),
+		inspector: insp,
+		events:    ch,
+		known:     make(map[uint64]ProcessConn),
+	}
+}
 
 func (m *Monitor) Run(ctx context.Context) {
 	ticker := time.NewTicker(pollInterval)
@@ -44,26 +58,109 @@ func (m *Monitor) Run(ctx context.Context) {
 	}
 }
 
+func readProcNetDevTotals() (uint64, uint64) {
+	f, err := os.Open("/proc/net/dev")
+	if err != nil { return 0, 0 }
+	defer f.Close()
+	var totalRx, totalTx uint64
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		idx := strings.Index(line, ":")
+		if idx < 0 { continue }
+		fields := strings.Fields(line[idx+1:])
+		if len(fields) >= 9 {
+			rx, _ := strconv.ParseUint(fields[0], 10, 64)
+			tx, _ := strconv.ParseUint(fields[8], 10, 64)
+			totalRx += rx
+			totalTx += tx
+		}
+	}
+	return totalTx, totalRx
+}
+
+func readProcNetArp() []inspector.ArpSample {
+	f, err := os.Open("/proc/net/arp")
+	if err != nil { return nil }
+	defer f.Close()
+	var out []inspector.ArpSample
+	scanner := bufio.NewScanner(f)
+	scanner.Scan()
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) >= 6 {
+			out = append(out, inspector.ArpSample{IP: fields[0], Flags: fields[2], HWAddr: fields[3], Device: fields[5]})
+		}
+	}
+	return out
+}
+
 func (m *Monitor) poll() {
 	current, err := m.snapshot()
 	if err != nil { return }
+	txBytes, rxBytes := readProcNetDevTotals()
+
+	if m.inspector != nil {
+		flows := make([]inspector.FlowSample, 0, len(current))
+		for _, conn := range current {
+			flows = append(flows, inspector.FlowSample{
+				Protocol:   conn.Protocol,
+				LocalIP:    conn.LocalIP.String(),
+				LocalPort:  conn.LocalPort,
+				RemoteIP:   conn.RemoteIP.String(),
+				RemotePort: conn.RemotePort,
+				State:      conn.State,
+				PID:        conn.PID,
+				Process:    conn.Process,
+				UID:        conn.UID,
+				BytesTX:    txBytes,
+				BytesRX:    rxBytes,
+			})
+		}
+		findings := m.inspector.InspectSnapshot(flows, readProcNetArp())
+		for _, finding := range findings {
+			ev := NetEvent{
+				ID:         finding.ID,
+				Kind:       "packet_anomaly",
+				PID:        finding.PID,
+				Process:    finding.Process,
+				Protocol:   strings.ToLower(finding.Protocol),
+				Direction:  "outbound",
+				RemoteIP:   finding.DstEndpoint,
+				RemotePort: 0,
+				BytesTX:    txBytes,
+				BytesRX:    rxBytes,
+				TsMs:       finding.TsMs,
+				Alert: &rules.NetAlert{
+					Rule:       finding.Rule,
+					Confidence: finding.Severity,
+					Severity:   finding.Severity,
+					Reason:     finding.Summary,
+					Category:   finding.Category,
+				},
+			}
+			select { case m.events <- ev: default: }
+		}
+	}
+
 	m.mu.Lock(); defer m.mu.Unlock()
 	for inode, conn := range current {
 		if _, seen := m.known[inode]; seen { continue }
 		m.known[inode] = conn
-		m.emit(conn)
+		m.emit(conn, txBytes, rxBytes)
 	}
 	for inode := range m.known { if _, alive := current[inode]; !alive { delete(m.known, inode) } }
 }
 
-func (m *Monitor) emit(conn ProcessConn) {
+func (m *Monitor) emit(conn ProcessConn, txBytes uint64, rxBytes uint64) {
 	dir := "outbound"
 	if conn.LocalPort < 1024 { dir = "inbound" }
 	ev := NetEvent{
 		ID: fmt.Sprintf("net-%d-%d", conn.PID, time.Now().UnixNano()), Kind: "net_conn",
 		PID: conn.PID, Process: conn.Process, Protocol: conn.Protocol, Direction: dir,
 		LocalIP: conn.LocalIP.String(), LocalPort: conn.LocalPort,
-		RemoteIP: conn.RemoteIP.String(), RemotePort: conn.RemotePort, TsMs: time.Now().UnixMilli(),
+		RemoteIP: conn.RemoteIP.String(), RemotePort: conn.RemotePort,
+		BytesTX: txBytes, BytesRX: rxBytes, TsMs: time.Now().UnixMilli(),
 	}
 	connInfo := &rules.ConnInfo{PID: conn.PID, Process: conn.Process, UID: conn.UID, RemoteIP: conn.RemoteIP, RemotePort: conn.RemotePort, LocalPort: conn.LocalPort}
 	if alert := m.rules.Evaluate(connInfo); alert != nil { ev.Kind = "net_alert"; ev.Alert = alert }
@@ -202,6 +299,12 @@ func getWindowsProcMap() map[uint32]string {
 	return res
 }
 
+var tcpStateMap = map[string]string{
+	"01": "ESTABLISHED", "02": "SYN_SENT", "03": "SYN_RECV", "04": "FIN_WAIT1",
+	"05": "FIN_WAIT2", "06": "TIME_WAIT", "07": "CLOSE", "08": "CLOSE_WAIT",
+	"09": "LAST_ACK", "0A": "LISTEN", "0B": "CLOSING",
+}
+
 func readProcNet(proto string) ([]Connection, error) {
 	f, err := os.Open(fmt.Sprintf("/proc/net/%s", proto))
 	if err != nil { return nil, err }
@@ -214,9 +317,11 @@ func readProcNet(proto string) ([]Connection, error) {
 		if len(fields) < 10 { continue }
 		localIP, localPort := parseAddr(fields[1])
 		remoteIP, remotePort := parseAddr(fields[2])
+		stateName := tcpStateMap[strings.ToUpper(fields[3])]
+		if stateName == "" { stateName = "OPEN" }
 		inode, _ := strconv.ParseUint(fields[9], 10, 64)
 		uid32, _ := strconv.ParseUint(fields[7], 10, 32)
-		conns = append(conns, Connection{Inode: inode, LocalIP: localIP, LocalPort: localPort, RemoteIP: remoteIP, RemotePort: remotePort, UID: uint32(uid32)})
+		conns = append(conns, Connection{Inode: inode, LocalIP: localIP, LocalPort: localPort, RemoteIP: remoteIP, RemotePort: remotePort, State: stateName, UID: uint32(uid32)})
 	}
 	return conns, nil
 }

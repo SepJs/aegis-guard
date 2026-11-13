@@ -13,14 +13,13 @@ const VIOLET: &str = "\x1b[35m"; const DIM: &str = "\x1b[2m";
 fn main() -> anyhow::Result<()> {
     print!("\x1b[2J\x1b[H"); io::stdout().flush().ok();
     println!("{VIOLET}{BOLD}");
-    println!("  ╔═══════════════════════════════════════════╗");
-    println!("  ║     AEGIS-GUARD  INSTALLER  v1.1.0       ║");
-    println!("  ║     by Vladimir Unknown                   ║");
-    println!("  ╚═══════════════════════════════════════════╝");
+    println!("  ┌─────────────────────────────────────────────┐");
+    println!("  │       AEGIS-GUARD INSTALLER  v1.2.0         │");
+    println!("  └─────────────────────────────────────────────┘");
     println!("{RESET}");
 
-    println!("{CYAN}This wizard builds everything and sets up system services.{RESET}");
-    println!("{DIM}For a quicker one-shot run + launch, use: bash aegis.sh{RESET}\n");
+    println!("{CYAN}This wizard builds Rust/Go engines and prepares UI dependencies.{RESET}");
+    println!("{DIM}Console mode directly: bash aegis.sh --console{RESET}\n");
 
     print!("{BOLD}Proceed? [Y/n]:{RESET} "); io::stdout().flush()?;
     let mut input = String::new(); io::stdin().read_line(&mut input)?;
@@ -56,16 +55,15 @@ fn main() -> anyhow::Result<()> {
         c.arg("install");
         c
     };
-    npm_cmd.current_dir("tauri-app");
     let _ = npm_cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit()).status();
     step_ok("npm dependencies installed");
 
     let run_cmd = if cfg!(windows) {
         "installers\\install-windows.bat"
     } else {
-        "bash aegis.sh"
+        "bash aegis.sh --console"
     };
-    println!("\n{GREEN}{BOLD}Done.{RESET} Run everything with:\n  {CYAN}{run_cmd}{RESET}\n");
+    println!("\n{GREEN}{BOLD}Done.{RESET} Start with:\n  {CYAN}{run_cmd}{RESET}\n");
     Ok(())
 }
 

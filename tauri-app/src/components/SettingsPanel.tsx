@@ -1,6 +1,12 @@
 import { useState, useEffect } from "react";
 import { invoke } from "../lib/ipc/core";
-import type { StorageStats, AutoPruneConfig, PruneResult } from "../types";
+import type {
+  StorageStats,
+  AutoPruneConfig,
+  PruneResult,
+  SystemSettings,
+  RuntimeInfo,
+} from "../types";
 
 export type ThemeId = "cyber-purple" | "dark-void" | "github-dark" | "obsidian-matrix";
 
@@ -34,39 +40,39 @@ function formatTimeAgo(ts: number | null): string {
 const THEMES: ThemeOption[] = [
   {
     id: "cyber-purple",
-    name: "Cyber Purple",
-    tag: "SIGNATURE",
-    desc: "Aegis-Guard classic deep ultraviolet neon with subtle scanlines",
-    previewBg: "#0d0d16",
-    previewAccent: "#8b5cf6",
-    previewText: "#c4b5fd",
+    name: "Slate Ultraviolet",
+    tag: "DEFAULT",
+    desc: "Balanced dark slate workspace with subtle ultraviolet focus accents.",
+    previewBg: "#0e1118",
+    previewAccent: "#7c3aed",
+    previewText: "#b49eff",
   },
   {
     id: "dark-void",
     name: "Dark Void",
-    tag: "STEALTH OLED",
-    desc: "True pitch-black 0% luminance canvas with crimson stealth accents",
-    previewBg: "#040404",
+    tag: "OLED STEALTH",
+    desc: "High-contrast deep obsidian surface with crisp crimson alert accents.",
+    previewBg: "#08080b",
     previewAccent: "#e11d48",
-    previewText: "#ffffff",
+    previewText: "#fafafa",
   },
   {
     id: "github-dark",
-    name: "GitHub Dark Modern",
-    tag: "DEV REFINED",
-    desc: "Subtle blue-gray slate background with GitHub sky accent & crisp borders",
+    name: "GitHub Dark",
+    tag: "DEVELOPER",
+    desc: "Familiar blue-gray slate palette with crisp structural 1px borders.",
     previewBg: "#161b22",
-    previewAccent: "#58a6ff",
+    previewAccent: "#2f81f7",
     previewText: "#f0f6fc",
   },
   {
     id: "obsidian-matrix",
     name: "Obsidian Matrix",
     tag: "TACTICAL",
-    desc: "Deep tactical emerald green phosphor for high-stress security monitoring",
-    previewBg: "#06140c",
+    desc: "Deep tactical emerald console optimized for long monitoring shifts.",
+    previewBg: "#09150e",
     previewAccent: "#10b981",
-    previewText: "#6ee7b7",
+    previewText: "#a7f3d0",
   },
 ];
 
@@ -75,15 +81,17 @@ export default function SettingsPanel() {
     return (localStorage.getItem("aegis_theme") as ThemeId) || "cyber-purple";
   });
 
-  // Permission toggles
+  // Real persisted system capability & AV toggles
   const [permEBPF, setPermEBPF] = useState(true);
   const [permKill, setPermKill] = useState(true);
   const [permNetAdmin, setPermNetAdmin] = useState(true);
   const [permAutoUpdate, setPermAutoUpdate] = useState(true);
   const [permTamperProof, setPermTamperProof] = useState(true);
+  const [permRealtimeAv, setPermRealtimeAv] = useState(true);
+  const [savingPerms, setSavingPerms] = useState(false);
 
-  // Status message
-  const [savedMsg, setSavedMsg] = useState(false);
+  const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null);
+  const [statusNotice, setStatusNotice] = useState<{ text: string; isError?: boolean } | null>(null);
 
   // Storage & Pruner Utility state
   const [storageStats, setStorageStats] = useState<StorageStats | null>(null);
@@ -92,18 +100,26 @@ export default function SettingsPanel() {
   const [pruneResult, setPruneResult] = useState<PruneResult | null>(null);
   const [showArtifacts, setShowArtifacts] = useState(false);
 
-  // Editable pruning preferences
   const [retentionDays, setRetentionDays] = useState(7);
   const [maxDebugEntries, setMaxDebugEntries] = useState(100);
   const [cleanTempFiles, setCleanTempFiles] = useState(true);
   const [cleanSandbox, setCleanSandbox] = useState(true);
   const [cleanPcap, setCleanPcap] = useState(true);
 
-  async function loadStorageInfo() {
+  const flashNotice = (text: string, isError = false) => {
+    setStatusNotice({ text, isError });
+    setTimeout(() => setStatusNotice(null), 3000);
+  };
+
+  async function loadAllSettings() {
     try {
-      const stats = await invoke<StorageStats>("get_storage_stats");
+      const [stats, cfg, sysCfg, rtInfo] = await Promise.all([
+        invoke<StorageStats>("get_storage_stats"),
+        invoke<AutoPruneConfig>("get_auto_prune_config"),
+        invoke<SystemSettings>("get_system_settings"),
+        invoke<RuntimeInfo>("get_runtime_info"),
+      ]);
       if (stats) setStorageStats(stats);
-      const cfg = await invoke<AutoPruneConfig>("get_auto_prune_config");
       if (cfg) {
         setAutoPruneConfig(cfg);
         setRetentionDays(cfg.retention_days);
@@ -112,13 +128,22 @@ export default function SettingsPanel() {
         setCleanSandbox(cfg.clean_sandbox_artifacts);
         setCleanPcap(cfg.clean_pcap_buffers);
       }
+      if (sysCfg) {
+        setPermEBPF(Boolean(sysCfg.process_inspection_enabled));
+        setPermKill(Boolean(sysCfg.active_kill_enabled));
+        setPermNetAdmin(Boolean(sysCfg.net_admin_enabled));
+        setPermTamperProof(Boolean(sysCfg.tamper_proof_audit));
+        setPermAutoUpdate(Boolean(sysCfg.auto_update_enabled));
+        setPermRealtimeAv(Boolean(sysCfg.realtime_av_enabled));
+      }
+      if (rtInfo) setRuntimeInfo(rtInfo);
     } catch (err) {
-      console.error("Failed to load storage stats:", err);
+      console.error("Failed to load settings:", err);
     }
   }
 
   useEffect(() => {
-    loadStorageInfo();
+    loadAllSettings();
   }, []);
 
   async function handleRunPrune() {
@@ -132,10 +157,10 @@ export default function SettingsPanel() {
         clean_pcap: cleanPcap,
       });
       setPruneResult(res);
-      await loadStorageInfo();
+      await loadAllSettings();
       setTimeout(() => setPruneResult(null), 6000);
-    } catch (err) {
-      console.error("Prune failed:", err);
+    } catch (err: any) {
+      flashNotice(`Prune failed: ${err?.message || String(err)}`, true);
     } finally {
       setIsPruning(false);
     }
@@ -152,11 +177,10 @@ export default function SettingsPanel() {
         clean_pcap_buffers: cleanPcap,
       });
       setAutoPruneConfig(updated);
-      await loadStorageInfo();
-      setSavedMsg(true);
-      setTimeout(() => setSavedMsg(false), 2000);
-    } catch (err) {
-      console.error("Failed to update auto prune config:", err);
+      await loadAllSettings();
+      flashNotice("Auto-pruner schedule saved");
+    } catch (err: any) {
+      flashNotice(`Failed to update pruner: ${err?.message || String(err)}`, true);
     }
   }
 
@@ -171,249 +195,264 @@ export default function SettingsPanel() {
         clean_pcap_buffers: cleanPcap,
       });
       setAutoPruneConfig(updated);
-      await loadStorageInfo();
-      setSavedMsg(true);
-      setTimeout(() => setSavedMsg(false), 2000);
-    } catch (err) {
-      console.error("Failed to save pruning preferences:", err);
+      await loadAllSettings();
+      flashNotice("Storage pruning policy persisted");
+    } catch (err: any) {
+      flashNotice(`Failed to save policy: ${err?.message || String(err)}`, true);
     }
   }
 
   useEffect(() => {
-    // Apply theme class to document body
     document.body.className = `theme-${currentTheme}`;
     localStorage.setItem("aegis_theme", currentTheme);
   }, [currentTheme]);
 
   const handleSelectTheme = (id: ThemeId) => {
     setCurrentTheme(id);
-    setSavedMsg(true);
-    setTimeout(() => setSavedMsg(false), 2000);
+    flashNotice("Theme applied and saved");
   };
 
-  const handleSavePerms = () => {
-    invoke("record_telemetry_event", {
-      category: "SETTINGS_PERMISSIONS_UPDATE",
-      action: "CAPABILITIES_RECONFIGURED",
-      details: `eBPF:${permEBPF}, Kill:${permKill}, Net:${permNetAdmin}, Update:${permAutoUpdate}, Tamper:${permTamperProof}`,
-    }).catch(() => {});
-
-    setSavedMsg(true);
-    setTimeout(() => setSavedMsg(false), 2500);
+  const handleSavePerms = async () => {
+    setSavingPerms(true);
+    try {
+      const saved = await invoke<SystemSettings>("update_system_settings", {
+        process_inspection_enabled: permEBPF,
+        active_kill_enabled: permKill,
+        net_admin_enabled: permNetAdmin,
+        tamper_proof_audit: permTamperProof,
+        auto_update_enabled: permAutoUpdate,
+        realtime_av_enabled: permRealtimeAv,
+      });
+      if (saved) {
+        setPermEBPF(saved.process_inspection_enabled);
+        setPermKill(saved.active_kill_enabled);
+        setPermNetAdmin(saved.net_admin_enabled);
+        setPermTamperProof(saved.tamper_proof_audit);
+        setPermAutoUpdate(saved.auto_update_enabled);
+        setPermRealtimeAv(saved.realtime_av_enabled);
+      }
+      flashNotice("Security & capability configuration persisted to disk");
+    } catch (err: any) {
+      flashNotice(`Failed to persist configuration: ${err?.message || String(err)}`, true);
+    } finally {
+      setSavingPerms(false);
+    }
   };
 
   return (
     <div className="panel" id="settings-panel" style={{ overflowY: "auto", padding: 20 }}>
       {/* Top Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, borderBottom: "1px solid var(--border)", paddingBottom: 14 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 20,
+          borderBottom: "1px solid var(--border)",
+          paddingBottom: 14,
+        }}
+      >
         <div>
-          <h1 style={{ fontSize: 16, fontWeight: 700, color: "var(--tx0)", letterSpacing: "0.06em", margin: 0 }}>
-            SYSTEM CONFIGURATION & PREFERENCES
+          <h1 style={{ fontSize: 16, fontWeight: 700, color: "var(--tx0)", margin: 0 }}>
+            System Configuration &amp; Preferences
           </h1>
-          <p style={{ fontSize: 11, color: "var(--tx2)", margin: "4px 0 0" }}>
-            Kernel Capabilities, Security Policies & Premium Display Themes
+          <p style={{ fontSize: 12, color: "var(--tx2)", margin: "4px 0 0" }}>
+            Kernel Capabilities, Real-Time Antivirus Policies, Storage Hygiene &amp; Display Themes
           </p>
         </div>
-        {savedMsg && (
-          <span style={{ fontSize: 11, color: "var(--teall)", fontWeight: 700, animation: "fadeIn 200ms" }}>
-            ✓ SETTINGS PERSISTED
+        {statusNotice && (
+          <span
+            style={{
+              fontSize: 12,
+              color: statusNotice.isError ? "var(--redl)" : "var(--teall)",
+              fontWeight: 600,
+            }}
+          >
+            {statusNotice.isError ? "✕ " : "✓ "}
+            {statusNotice.text}
           </span>
         )}
       </div>
 
       {/* Theme Customization Section */}
-      <div style={{ marginBottom: 28 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-          <span style={{ fontSize: 14, color: "var(--vl)" }}>🎨</span>
-          <h2 style={{ fontSize: 13, fontWeight: 700, color: "var(--tx0)", letterSpacing: "0.05em", margin: 0 }}>
-            APPEARANCE & DISPLAY THEME
-          </h2>
-        </div>
+      <div style={{ marginBottom: 26 }}>
+        <h2 style={{ fontSize: 13, fontWeight: 700, color: "var(--tx0)", marginBottom: 12 }}>
+          Appearance &amp; Workspace Theme
+        </h2>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 12 }}>
           {THEMES.map((th) => {
             const isSelected = currentTheme === th.id;
             return (
-              <div
+              <button
                 key={th.id}
+                type="button"
                 onClick={() => handleSelectTheme(th.id)}
                 style={{
                   background: "var(--bg1)",
                   border: isSelected ? "2px solid var(--v)" : "1px solid var(--border)",
                   borderRadius: "var(--r)",
                   padding: 14,
-                  cursor: "pointer",
+                  textAlign: "left",
                   display: "flex",
                   flexDirection: "column",
-                  gap: 10,
-                  transition: "all 140ms ease",
-                  position: "relative",
-                  boxShadow: isSelected ? "0 0 16px var(--v2)" : "none",
+                  gap: 8,
+                  transition: "border-color 120ms, background 120ms",
                 }}
               >
-                {/* Visual Swatch Pill */}
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <div
                       style={{
-                        width: 18,
-                        height: 18,
+                        width: 16,
+                        height: 16,
                         borderRadius: "50%",
                         backgroundColor: th.previewBg,
                         border: `2px solid ${th.previewAccent}`,
-                        boxShadow: `0 0 8px ${th.previewAccent}66`,
                       }}
                     />
-                    <span style={{ fontSize: 12, fontWeight: 700, color: isSelected ? "var(--vl)" : "var(--tx0)" }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: isSelected ? "var(--vl)" : "var(--tx0)" }}>
                       {th.name}
                     </span>
                   </div>
                   <span
                     style={{
-                      fontSize: 8.5,
-                      fontWeight: 700,
+                      fontSize: 9,
+                      fontFamily: "var(--mono)",
+                      fontWeight: 600,
                       padding: "2px 6px",
-                      borderRadius: 3,
-                      background: isSelected ? "var(--v)" : "var(--bg3)",
+                      borderRadius: 4,
+                      background: isSelected ? "var(--v)" : "var(--bg2)",
                       color: isSelected ? "#fff" : "var(--tx2)",
-                      letterSpacing: "0.05em",
                     }}
                   >
                     {th.tag}
                   </span>
                 </div>
 
-                <p style={{ margin: 0, fontSize: 10.5, color: "var(--tx2)", lineHeight: 1.45 }}>
+                <p style={{ margin: 0, fontSize: 11.5, color: "var(--tx2)", lineHeight: 1.45 }}>
                   {th.desc}
                 </p>
 
-                {/* Color swatches strip */}
-                <div style={{ display: "flex", height: 6, borderRadius: 3, overflow: "hidden", marginTop: 4 }}>
+                <div style={{ display: "flex", height: 5, width: "100%", borderRadius: 3, overflow: "hidden", marginTop: 2 }}>
                   <div style={{ flex: 2, background: th.previewBg }} />
                   <div style={{ flex: 1, background: th.previewAccent }} />
                   <div style={{ flex: 1, background: th.previewText }} />
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
       </div>
 
-      {/* Kernel Privileges & System Capabilities */}
-      <div style={{ marginBottom: 28 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-          <span style={{ fontSize: 14, color: "var(--teall)" }}>🛡️</span>
-          <h2 style={{ fontSize: 13, fontWeight: 700, color: "var(--tx0)", letterSpacing: "0.05em", margin: 0 }}>
-            KERNEL HOOKS & SYSTEM PRIVILEGES
-          </h2>
-        </div>
+      {/* Kernel Privileges & Antivirus Capabilities */}
+      <div style={{ marginBottom: 26 }}>
+        <h2 style={{ fontSize: 13, fontWeight: 700, color: "var(--tx0)", marginBottom: 12 }}>
+          Kernel Hooks, Antivirus &amp; Enforcement Policies
+        </h2>
 
-        <div style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: "var(--r)", padding: "8px 16px" }}>
-          {/* Privilege Row 1 */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 0", borderBottom: "1px solid var(--border)" }}>
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: "var(--tx0)" }}>
-                Process Lineage & Memory Inspection (<code style={{ color: "var(--teall)", fontSize: 10 }}>CAP_SYS_PTRACE</code>)
+        <div style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: "var(--r)", padding: "4px 16px" }}>
+          {[
+            {
+              id: "chk-perm-av",
+              title: "Real-Time Process & Binary Antivirus",
+              badge: "LIVE /PROC AV",
+              badgeColor: "var(--teall)",
+              desc: "Inspects running /proc executables and command lines against SHA-256 threat intel feeds and byte signatures.",
+              checked: permRealtimeAv,
+              onChange: setPermRealtimeAv,
+            },
+            {
+              id: "chk-perm-ebpf",
+              title: "Process Lineage & Behavioral Rules",
+              badge: "CAP_SYS_PTRACE",
+              badgeColor: "var(--vl)",
+              desc: "Evaluates parent-child execution trees, volatile path launches, and obfuscated command pipelines.",
+              checked: permEBPF,
+              onChange: setPermEBPF,
+            },
+            {
+              id: "chk-perm-kill",
+              title: "Active Process Neutralization",
+              badge: "CAP_KILL",
+              badgeColor: "var(--redl)",
+              desc: "Permits sending SIGTERM/SIGSTOP signals to terminate or freeze confirmed malicious processes.",
+              checked: permKill,
+              onChange: setPermKill,
+            },
+            {
+              id: "chk-perm-net",
+              title: "Network Socket & Packet IDS Filtering",
+              badge: "CAP_NET_ADMIN",
+              badgeColor: "var(--vl)",
+              desc: "Enables live /proc/net socket inspection, ARP MAC collision alerts, and Go packet daemon monitoring.",
+              checked: permNetAdmin,
+              onChange: setPermNetAdmin,
+            },
+            {
+              id: "chk-perm-tamper",
+              title: "Cryptographic Tamper-Proof Audit Chain",
+              badge: runtimeInfo?.audit_hash_algo || "SHA-256",
+              badgeColor: "var(--teall)",
+              desc: "Links every remediation and configuration change into a verifiable cryptographic digest chain.",
+              checked: permTamperProof,
+              onChange: setPermTamperProof,
+            },
+            {
+              id: "chk-perm-update",
+              title: "Automated Threat Intel & Signature Updates",
+              badge: "FEED SYNC",
+              badgeColor: "var(--tx1)",
+              desc: "Allows background signature feed checks and rule database reloads.",
+              checked: permAutoUpdate,
+              onChange: setPermAutoUpdate,
+            },
+          ].map((row, idx, arr) => (
+            <label
+              key={row.id}
+              htmlFor={row.id}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 16,
+                padding: "12px 0",
+                borderBottom: idx < arr.length - 1 ? "1px solid var(--border-dim)" : "none",
+                cursor: "pointer",
+              }}
+            >
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, color: "var(--tx0)" }}>
+                  <span>{row.title}</span>
+                  <code style={{ color: row.badgeColor, fontSize: 10 }}>{row.badge}</code>
+                </div>
+                <div style={{ fontSize: 11.5, color: "var(--tx2)", marginTop: 2 }}>{row.desc}</div>
               </div>
-              <div style={{ fontSize: 10.5, color: "var(--tx2)", marginTop: 2 }}>
-                Allows Aegis-Guard to attach non-invasive probes to inspect parent-child execution forks and environment tampering.
-              </div>
-            </div>
-            <label className="switch" style={{ cursor: "pointer" }}>
               <input
+                id={row.id}
                 type="checkbox"
-                checked={permEBPF}
-                onChange={(e) => setPermEBPF(e.target.checked)}
-                style={{ accentColor: "var(--teal)" }}
+                checked={row.checked}
+                onChange={(e) => row.onChange(e.target.checked)}
+                style={{ accentColor: "var(--teal)", width: 16, height: 16, cursor: "pointer", flexShrink: 0 }}
               />
             </label>
-          </div>
-
-          {/* Privilege Row 2 */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 0", borderBottom: "1px solid var(--border)" }}>
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: "var(--tx0)" }}>
-                Active Process Neutralization (<code style={{ color: "var(--redl)", fontSize: 10 }}>CAP_KILL</code>)
-              </div>
-              <div style={{ fontSize: 10.5, color: "var(--tx2)", marginTop: 2 }}>
-                Permits sending immediate atomic <code style={{ color: "var(--redl)" }}>SIGKILL</code> / <code style={{ color: "var(--amberl)" }}>SIGSTOP</code> to rogue process trees exceeding confidence thresholds.
-              </div>
-            </div>
-            <input
-              type="checkbox"
-              checked={permKill}
-              onChange={(e) => setPermKill(e.target.checked)}
-              style={{ accentColor: "var(--teal)" }}
-            />
-          </div>
-
-          {/* Privilege Row 3 */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 0", borderBottom: "1px solid var(--border)" }}>
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: "var(--tx0)" }}>
-                Raw Packet Filter & Null-Route (<code style={{ color: "var(--vl)", fontSize: 10 }}>CAP_NET_ADMIN / CAP_NET_RAW</code>)
-              </div>
-              <div style={{ fontSize: 10.5, color: "var(--tx2)", marginTop: 2 }}>
-                Promiscuous socket monitoring, ARP spoofing detection, and automated iptables/nftables C2 IP blocking.
-              </div>
-            </div>
-            <input
-              type="checkbox"
-              checked={permNetAdmin}
-              onChange={(e) => setPermNetAdmin(e.target.checked)}
-              style={{ accentColor: "var(--teal)" }}
-            />
-          </div>
-
-          {/* Privilege Row 4 */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 0", borderBottom: "1px solid var(--border)" }}>
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: "var(--tx0)" }}>
-                Cryptographic Tamper-Proof Audit Vault
-              </div>
-              <div style={{ fontSize: 10.5, color: "var(--tx2)", marginTop: 2 }}>
-                BLAKE3 hash-chained journal entries in SQLite. Records cannot be silently modified or rolled back by malware.
-              </div>
-            </div>
-            <input
-              type="checkbox"
-              checked={permTamperProof}
-              onChange={(e) => setPermTamperProof(e.target.checked)}
-              style={{ accentColor: "var(--teal)" }}
-            />
-          </div>
-
-          {/* Privilege Row 5 */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 0" }}>
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: "var(--tx0)" }}>
-                Automated Background Threat Intel & Patching
-              </div>
-              <div style={{ fontSize: 10.5, color: "var(--tx2)", marginTop: 2 }}>
-                Periodically check for malware rule updates and engine patches with cryptographic signature verification.
-              </div>
-            </div>
-            <input
-              type="checkbox"
-              checked={permAutoUpdate}
-              onChange={(e) => setPermAutoUpdate(e.target.checked)}
-              style={{ accentColor: "var(--teal)" }}
-            />
-          </div>
+          ))}
         </div>
 
         <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
           <button
+            id="btn-save-system-settings"
+            type="button"
             className="action-btn"
+            disabled={savingPerms}
             onClick={handleSavePerms}
-            style={{ padding: "6px 18px", fontSize: 11 }}
           >
-            APPLY PRIVILEGE CONFIGURATION
+            {savingPerms ? "Saving configuration…" : "Apply Configuration"}
           </button>
         </div>
       </div>
 
-      {/* Automated Application Directory Cleanup & Storage Pruner */}
+      {/* Storage Hygiene & Pruner */}
       <div
         id="directory-cleaner-section"
         style={{
@@ -421,68 +460,42 @@ export default function SettingsPanel() {
           border: "1px solid var(--border)",
           borderRadius: "var(--r)",
           padding: 16,
-          marginBottom: 24,
+          marginBottom: 20,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 15, color: "var(--vl)" }}>🧹</span>
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--tx0)", letterSpacing: "0.05em" }}>
-                AUTOMATED APPLICATION DIRECTORY CLEANUP & STORAGE PRUNER
-              </div>
-              <div style={{ fontSize: 10.5, color: "var(--tx2)", marginTop: 2 }}>
-                Maintains a lean, pristine application directory by automatically purging outdated debug traces and temporary forensic dumps.
-              </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 10 }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--tx0)" }}>
+              Storage Hygiene &amp; Forensic Log Pruner
+            </div>
+            <div style={{ fontSize: 11.5, color: "var(--tx2)", marginTop: 2 }}>
+              Purges expired debug trace logs, quarantine artifacts, and temporary sandbox workspaces.
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {storageStats && (
-              <span
-                style={{
-                  fontSize: 10,
-                  fontWeight: 700,
-                  padding: "3px 8px",
-                  borderRadius: "var(--r)",
-                  background: storageStats.total_reclaimable_bytes > 0 ? "rgba(139,92,246,0.15)" : "rgba(13,148,136,0.15)",
-                  color: storageStats.total_reclaimable_bytes > 0 ? "var(--vl)" : "var(--teall)",
-                  border: `1px solid ${storageStats.total_reclaimable_bytes > 0 ? "var(--v)" : "var(--teal)"}`,
-                }}
-              >
+              <span className="pstat" style={{ color: storageStats.total_reclaimable_bytes > 0 ? "var(--vl)" : "var(--teall)" }}>
                 {storageStats.total_reclaimable_bytes > 0
-                  ? `${formatBytes(storageStats.total_reclaimable_bytes)} RECLAIMABLE`
-                  : "DIRECTORY PRISTINE"}
+                  ? `${formatBytes(storageStats.total_reclaimable_bytes)} reclaimable`
+                  : "Storage clean"}
               </span>
             )}
             <button
               id="btn-run-directory-prune"
+              type="button"
+              className="btn-primary"
               onClick={handleRunPrune}
               disabled={isPruning}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "6px 14px",
-                background: "var(--v)",
-                color: "#ffffff",
-                border: "none",
-                borderRadius: "var(--r)",
-                fontSize: 11,
-                fontWeight: 700,
-                cursor: isPruning ? "not-allowed" : "pointer",
-                transition: "all 150ms ease",
-              }}
             >
-              <span>{isPruning ? "CLEANING..." : "⚡ CLEAN DIRECTORY NOW"}</span>
+              {isPruning ? "Cleaning…" : "Clean Storage Now"}
             </button>
           </div>
         </div>
 
-        {/* Pruning Result Alert */}
         {pruneResult && (
           <div
             style={{
-              background: "rgba(13,148,136,0.15)",
+              background: "rgba(13,148,136,0.12)",
               border: "1px solid var(--teal)",
               borderRadius: "var(--r)",
               padding: "10px 14px",
@@ -490,77 +503,61 @@ export default function SettingsPanel() {
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
-              fontSize: 11,
+              fontSize: 12,
               color: "var(--teall)",
             }}
           >
-            <div>
-              <strong>Cleanup Succeeded:</strong> Removed {pruneResult.pruned_debug_entries} debug entries and {pruneResult.pruned_temp_files} temporary files. Reclaimed {formatBytes(pruneResult.freed_bytes)} of storage.
-            </div>
-            <span style={{ fontSize: 9.5, opacity: 0.8 }}>AUDIT RECORD DIGEST GENERATED</span>
+            <span>
+              <strong>Cleanup complete:</strong> Removed {pruneResult.pruned_debug_entries} trace entries and{" "}
+              {pruneResult.pruned_temp_files} temporary files ({formatBytes(pruneResult.freed_bytes)} reclaimed).
+            </span>
           </div>
         )}
 
-        {/* Storage Metrics Cards */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 16 }}>
-          <div style={{ background: "var(--bg0)", border: "1px solid var(--border)", borderRadius: "var(--r)", padding: 10 }}>
-            <div style={{ fontSize: 9.5, color: "var(--tx2)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-              Debug Trace Logs
-            </div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: "var(--tx0)", marginTop: 4 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10, marginBottom: 14 }}>
+          <div style={{ background: "var(--bg0)", border: "1px solid var(--border)", borderRadius: "var(--r)", padding: 12 }}>
+            <div style={{ fontSize: 10, color: "var(--tx2)", textTransform: "uppercase", fontWeight: 600 }}>Trace Logs</div>
+            <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: "var(--tx0)", marginTop: 4 }}>
               {storageStats ? storageStats.debug_entries_count : 0}{" "}
-              <span style={{ fontSize: 10.5, fontWeight: 500, color: "var(--tx2)" }}>
+              <span style={{ fontSize: 11, fontWeight: 400, color: "var(--tx2)" }}>
                 ({formatBytes(storageStats ? storageStats.debug_size_bytes : 0)})
               </span>
             </div>
-            <div style={{ fontSize: 9.5, color: "var(--tx2)", marginTop: 2 }}>Suppressed FP entries</div>
           </div>
 
-          <div style={{ background: "var(--bg0)", border: "1px solid var(--border)", borderRadius: "var(--r)", padding: 10 }}>
-            <div style={{ fontSize: 9.5, color: "var(--tx2)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-              Temp & Forensic Files
-            </div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: "var(--tx0)", marginTop: 4 }}>
+          <div style={{ background: "var(--bg0)", border: "1px solid var(--border)", borderRadius: "var(--r)", padding: 12 }}>
+            <div style={{ fontSize: 10, color: "var(--tx2)", textTransform: "uppercase", fontWeight: 600 }}>Quarantine &amp; Temp</div>
+            <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: "var(--tx0)", marginTop: 4 }}>
               {storageStats ? storageStats.temp_files_count : 0}{" "}
-              <span style={{ fontSize: 10.5, fontWeight: 500, color: "var(--tx2)" }}>
+              <span style={{ fontSize: 11, fontWeight: 400, color: "var(--tx2)" }}>
                 ({formatBytes(storageStats ? storageStats.temp_files_bytes : 0)})
               </span>
             </div>
-            <div style={{ fontSize: 9.5, color: "var(--tx2)", marginTop: 2 }}>Dumps, PCAP & scratch files</div>
           </div>
 
-          <div style={{ background: "var(--bg0)", border: "1px solid var(--border)", borderRadius: "var(--r)", padding: 10 }}>
-            <div style={{ fontSize: 9.5, color: "var(--tx2)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-              Reclaimable Space
-            </div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: "var(--vl)", marginTop: 4 }}>
+          <div style={{ background: "var(--bg0)", border: "1px solid var(--border)", borderRadius: "var(--r)", padding: 12 }}>
+            <div style={{ fontSize: 10, color: "var(--tx2)", textTransform: "uppercase", fontWeight: 600 }}>Reclaimable</div>
+            <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: "var(--vl)", marginTop: 4 }}>
               {formatBytes(storageStats ? storageStats.total_reclaimable_bytes : 0)}
             </div>
-            <div style={{ fontSize: 9.5, color: "var(--tx2)", marginTop: 2 }}>Stale buffers ready to purge</div>
           </div>
 
-          <div style={{ background: "var(--bg0)", border: "1px solid var(--border)", borderRadius: "var(--r)", padding: 10 }}>
-            <div style={{ fontSize: 9.5, color: "var(--tx2)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-              Last Maintenance
-            </div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: "var(--tx0)", marginTop: 4 }}>
+          <div style={{ background: "var(--bg0)", border: "1px solid var(--border)", borderRadius: "var(--r)", padding: 12 }}>
+            <div style={{ fontSize: 10, color: "var(--tx2)", textTransform: "uppercase", fontWeight: 600 }}>Last Prune</div>
+            <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: "var(--tx0)", marginTop: 4 }}>
               {formatTimeAgo(storageStats?.last_pruned_ts ?? null)}
-            </div>
-            <div style={{ fontSize: 9.5, color: "var(--teall)", marginTop: 2 }}>
-              {autoPruneConfig?.enabled ? "● Auto-Scheduler Active" : "○ Manual Mode"}
             </div>
           </div>
         </div>
 
-        {/* Configuration Options */}
-        <div style={{ background: "var(--bg0)", border: "1px solid var(--border)", borderRadius: "var(--r)", padding: 14, marginBottom: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, paddingBottom: 10, borderBottom: "1px solid var(--border)" }}>
+        <div style={{ background: "var(--bg0)", border: "1px solid var(--border)", borderRadius: "var(--r)", padding: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, paddingBottom: 10, borderBottom: "1px solid var(--border-dim)" }}>
             <div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--tx0)" }}>
-                Automated Background Pruner Routine
+              <div style={{ fontSize: 12, fontWeight: 600, color: "var(--tx0)" }}>
+                Automated Background Pruner
               </div>
-              <div style={{ fontSize: 10, color: "var(--tx2)", marginTop: 2 }}>
-                Periodically executes cleanup cycles in the background (every {autoPruneConfig?.interval_hours || 6} hours) to prevent disk clutter.
+              <div style={{ fontSize: 11, color: "var(--tx2)", marginTop: 2 }}>
+                Runs cleanup cycles every {autoPruneConfig?.interval_hours || 6} hours.
               </div>
             </div>
             <input
@@ -574,197 +571,109 @@ export default function SettingsPanel() {
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
             <div>
-              <label style={{ fontSize: 10, fontWeight: 600, color: "var(--tx2)", textTransform: "uppercase", letterSpacing: "0.05em", display: "block", marginBottom: 6 }}>
-                Log & Dump Retention Window
+              <label htmlFor="select-retention-days" style={{ fontSize: 11, fontWeight: 600, color: "var(--tx2)", display: "block", marginBottom: 6 }}>
+                Log Retention Window
               </label>
               <select
                 id="select-retention-days"
+                className="filter-select"
                 value={retentionDays}
                 onChange={(e) => setRetentionDays(Number(e.target.value))}
-                style={{
-                  width: "100%",
-                  padding: "6px 10px",
-                  background: "var(--bg1)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "var(--r)",
-                  color: "var(--tx0)",
-                  fontSize: 11,
-                  fontFamily: "inherit",
-                }}
+                style={{ width: "100%" }}
               >
-                <option value={1}>1 Day (Aggressive Developer Clean)</option>
-                <option value={3}>3 Days (Fast Rotation)</option>
-                <option value={7}>7 Days (Standard Production Balance)</option>
-                <option value={14}>14 Days (Extended Forensic Window)</option>
-                <option value={30}>30 Days (Compliance Archive Mode)</option>
+                <option value={1}>1 Day (Developer Clean)</option>
+                <option value={3}>3 Days</option>
+                <option value={7}>7 Days (Balanced)</option>
+                <option value={14}>14 Days (Extended Forensics)</option>
+                <option value={30}>30 Days (Archive)</option>
               </select>
             </div>
 
             <div>
-              <label style={{ fontSize: 10, fontWeight: 600, color: "var(--tx2)", textTransform: "uppercase", letterSpacing: "0.05em", display: "block", marginBottom: 6 }}>
-                Debug Log Retention Cap
+              <label htmlFor="select-max-debug-entries" style={{ fontSize: 11, fontWeight: 600, color: "var(--tx2)", display: "block", marginBottom: 6 }}>
+                Suppressed Trace Cap
               </label>
               <select
                 id="select-max-debug-entries"
+                className="filter-select"
                 value={maxDebugEntries}
                 onChange={(e) => setMaxDebugEntries(Number(e.target.value))}
-                style={{
-                  width: "100%",
-                  padding: "6px 10px",
-                  background: "var(--bg1)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "var(--r)",
-                  color: "var(--tx0)",
-                  fontSize: 11,
-                  fontFamily: "inherit",
-                }}
+                style={{ width: "100%" }}
               >
-                <option value={25}>Keep Top 25 Entries</option>
-                <option value={50}>Keep Top 50 Entries</option>
-                <option value={100}>Keep Top 100 Entries (Default)</option>
-                <option value={250}>Keep Top 250 Entries</option>
+                <option value={25}>25 Entries</option>
+                <option value={50}>50 Entries</option>
+                <option value={100}>100 Entries (Default)</option>
+                <option value={250}>250 Entries</option>
               </select>
             </div>
           </div>
 
-          <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
-            <div style={{ fontSize: 10, fontWeight: 600, color: "var(--tx2)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
-              Clean Target Directories & File Categories
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, fontSize: 10.5 }}>
-              <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: "var(--tx1)" }}>
-                <input
-                  type="checkbox"
-                  checked={cleanTempFiles}
-                  onChange={(e) => setCleanTempFiles(e.target.checked)}
-                  style={{ accentColor: "var(--teal)" }}
-                />
-                <span>Stale Forensics Memory Dumps</span>
-              </label>
-              <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: "var(--tx1)" }}>
-                <input
-                  type="checkbox"
-                  checked={cleanSandbox}
-                  onChange={(e) => setCleanSandbox(e.target.checked)}
-                  style={{ accentColor: "var(--teal)" }}
-                />
-                <span>Sandbox Detonation Scratch Dumps</span>
-              </label>
-              <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: "var(--tx1)" }}>
-                <input
-                  type="checkbox"
-                  checked={cleanPcap}
-                  onChange={(e) => setCleanPcap(e.target.checked)}
-                  style={{ accentColor: "var(--teal)" }}
-                />
-                <span>Network PCAP Packet Buffers</span>
-              </label>
-            </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginTop: 12, fontSize: 11.5 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: "var(--tx1)" }}>
+              <input type="checkbox" checked={cleanTempFiles} onChange={(e) => setCleanTempFiles(e.target.checked)} style={{ accentColor: "var(--teal)" }} />
+              <span>Quarantine &amp; Temp Files</span>
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: "var(--tx1)" }}>
+              <input type="checkbox" checked={cleanSandbox} onChange={(e) => setCleanSandbox(e.target.checked)} style={{ accentColor: "var(--teal)" }} />
+              <span>Sandbox Scratch Workspaces</span>
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: "var(--tx1)" }}>
+              <input type="checkbox" checked={cleanPcap} onChange={(e) => setCleanPcap(e.target.checked)} style={{ accentColor: "var(--teal)" }} />
+              <span>Packet Buffers</span>
+            </label>
           </div>
 
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--border-dim)" }}>
             <button
               id="btn-toggle-artifacts-list"
+              type="button"
               onClick={() => setShowArtifacts((v) => !v)}
-              style={{
-                background: "transparent",
-                border: "none",
-                color: "var(--vl)",
-                fontSize: 10.5,
-                fontWeight: 600,
-                cursor: "pointer",
-                padding: 0,
-                display: "flex",
-                alignItems: "center",
-                gap: 4,
-              }}
+              style={{ color: "var(--vl)", fontSize: 11, fontWeight: 600 }}
             >
-              <span>{showArtifacts ? "▲ HIDE APPLICATION ARTIFACTS" : "▼ INSPECT TEMPORARY FILES (" + (storageStats?.temp_artifacts?.length || 0) + ")"}</span>
+              {showArtifacts ? "Hide artifact files" : `Inspect artifacts (${storageStats?.temp_artifacts?.length || 0})`}
             </button>
             <button
               id="btn-save-pruning-config"
+              type="button"
               onClick={handleSavePruningConfig}
-              className="action-btn"
-              style={{ padding: "5px 14px", fontSize: 10.5 }}
+              className="sm-btn sm-btn--active"
             >
-              SAVE PRUNING POLICY
+              Save Pruning Policy
             </button>
           </div>
         </div>
 
-        {/* Temporary Files Inspection Table */}
         {showArtifacts && storageStats && (
-          <div
-            style={{
-              background: "var(--bg0)",
-              border: "1px solid var(--border)",
-              borderRadius: "var(--r)",
-              overflow: "hidden",
-              animation: "fadeIn 150ms ease",
-            }}
-          >
-            <div
-              style={{
-                padding: "6px 12px",
-                background: "var(--bg2)",
-                borderBottom: "1px solid var(--border)",
-                fontSize: 9.5,
-                fontWeight: 700,
-                color: "var(--tx2)",
-                letterSpacing: "0.06em",
-                textTransform: "uppercase",
-                display: "grid",
-                gridTemplateColumns: "1.8fr 1fr 90px 100px 90px",
-              }}
-            >
-              <span>File Path</span>
-              <span>Category</span>
-              <span>Size</span>
-              <span>Created</span>
-              <span>Status</span>
-            </div>
+          <div style={{ marginTop: 12, background: "var(--bg0)", border: "1px solid var(--border)", borderRadius: "var(--r)", overflow: "hidden" }}>
             <div style={{ maxHeight: 180, overflowY: "auto" }}>
               {storageStats.temp_artifacts.map((art) => (
                 <div
                   key={art.id}
+                  className="mono"
                   style={{
-                    padding: "6px 12px",
-                    borderBottom: "1px solid var(--border)",
+                    padding: "7px 12px",
+                    borderBottom: "1px solid var(--border-dim)",
                     display: "grid",
-                    gridTemplateColumns: "1.8fr 1fr 90px 100px 90px",
+                    gridTemplateColumns: "1.8fr 1fr 90px 100px 80px",
                     alignItems: "center",
-                    fontSize: 10.5,
-                    fontFamily: "monospace",
+                    fontSize: 11,
                     color: "var(--tx1)",
                   }}
                 >
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--tx0)" }} title={art.path}>
                     {art.path}
                   </span>
-                  <span style={{ textTransform: "capitalize", color: "var(--tx2)" }}>
-                    {art.category.replace("_", " ")}
-                  </span>
+                  <span style={{ color: "var(--tx2)" }}>{art.category.replace("_", " ")}</span>
                   <span>{formatBytes(art.size_bytes)}</span>
                   <span style={{ color: "var(--tx2)" }}>{formatTimeAgo(art.created_ts)}</span>
-                  <span>
-                    <span
-                      style={{
-                        padding: "2px 6px",
-                        borderRadius: "var(--r)",
-                        fontSize: 9,
-                        fontWeight: 700,
-                        background: art.stale ? "rgba(225,29,72,0.14)" : "rgba(13,148,136,0.14)",
-                        color: art.stale ? "#f43f5e" : "var(--teall)",
-                      }}
-                    >
-                      {art.stale ? "STALE" : "ACTIVE"}
-                    </span>
+                  <span style={{ color: art.stale ? "var(--redl)" : "var(--teall)", fontWeight: 600 }}>
+                    {art.stale ? "STALE" : "ACTIVE"}
                   </span>
                 </div>
               ))}
               {storageStats.temp_artifacts.length === 0 && (
-                <div style={{ padding: 14, textAlign: "center", fontSize: 11, color: "var(--tx2)" }}>
-                  No temporary files or scratch dumps found. Application directory is completely clean.
+                <div style={{ padding: 14, textAlign: "center", fontSize: 12, color: "var(--tx2)" }}>
+                  No quarantined or temporary artifacts stored.
                 </div>
               )}
             </div>
@@ -772,23 +681,47 @@ export default function SettingsPanel() {
         )}
       </div>
 
-      {/* System Integrity & Engine Information */}
+      {/* Live Engine & Runtime Diagnostics */}
       <div style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: "var(--r)", padding: 14 }}>
-        <div style={{ fontSize: 10, color: "var(--tx2)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>
-          ENGINE STATUS & CREDENTIALS
+        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--tx2)", textTransform: "uppercase", marginBottom: 10 }}>
+          Runtime Environment
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, fontSize: 11 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10, fontSize: 12 }}>
           <div>
-            <span style={{ color: "var(--tx2)" }}>Architecture: </span>
-            <span style={{ color: "var(--tx0)", fontWeight: 600 }}>x86_64 / aarch64</span>
+            <span style={{ color: "var(--tx2)" }}>Version: </span>
+            <span className="mono" style={{ color: "var(--tx0)", fontWeight: 600 }}>
+              v{runtimeInfo?.app_version || "1.2.0"} ({runtimeInfo?.engine_version || "4.6.0"})
+            </span>
           </div>
           <div>
-            <span style={{ color: "var(--tx2)" }}>Runtime IPC: </span>
-            <span style={{ color: "var(--teall)", fontWeight: 600 }}>Tauri v2 IPC (Active)</span>
+            <span style={{ color: "var(--tx2)" }}>Host OS / Arch: </span>
+            <span className="mono" style={{ color: "var(--tx0)", fontWeight: 600 }}>
+              {runtimeInfo ? `${runtimeInfo.platform} / ${runtimeInfo.arch}` : "Linux / x64"}
+            </span>
           </div>
           <div>
-            <span style={{ color: "var(--tx2)" }}>Quarantine: </span>
-            <span style={{ color: "var(--tx0)", fontWeight: 600 }}>/var/lib/aegis-guard/quarantine</span>
+            <span style={{ color: "var(--tx2)" }}>IPC Transport: </span>
+            <span className="mono" style={{ color: "var(--teall)", fontWeight: 600 }}>
+              {runtimeInfo?.transport || "HTTP + SSE IPC"}
+            </span>
+          </div>
+          <div>
+            <span style={{ color: "var(--tx2)" }}>Audit Digest: </span>
+            <span className="mono" style={{ color: "var(--vl)", fontWeight: 600 }}>
+              {runtimeInfo?.audit_hash_algo || "SHA-256"}
+            </span>
+          </div>
+          <div>
+            <span style={{ color: "var(--tx2)" }}>Go Packet Bridge: </span>
+            <span className="mono" style={{ color: runtimeInfo?.go_bridge_connected ? "var(--teall)" : "var(--tx1)", fontWeight: 600 }}>
+              {runtimeInfo?.go_bridge_connected ? "Connected (:50053)" : "/proc/net fallback active"}
+            </span>
+          </div>
+          <div>
+            <span style={{ color: "var(--tx2)" }}>Quarantine Vault: </span>
+            <span className="mono" style={{ color: "var(--tx0)", fontWeight: 600 }}>
+              {runtimeInfo?.quarantine_dir || "/tmp/aegis_guard_data/quarantine"}
+            </span>
           </div>
         </div>
       </div>

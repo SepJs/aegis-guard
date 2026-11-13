@@ -1,9 +1,12 @@
 # Aegis-Guard Makefile
 
-.PHONY: run build release check fix install clean
+.PHONY: run run-console run-net build release check fix install clean
 
 run:
 	bash aegis.sh
+
+run-console:
+	bash aegis.sh --console
 
 run-net:
 	AEGIS_NET=1 bash aegis.sh

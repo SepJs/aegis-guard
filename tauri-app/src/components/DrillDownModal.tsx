@@ -15,7 +15,7 @@ export default function DrillDownModal({ node, onClose }: { node: ProcessNode; o
     id: node.id,
     kind: "suspicious_parentage",
     severity: (node.anomaly?.severity as any) || (node.anomaly?.confidence === "high" ? "high" : "medium"),
-    risk_score: node.anomaly?.risk_score ?? (node.anomaly?.confidence === "high" ? 85 : 45),
+    risk_score: node.anomaly?.risk_score ?? (node.anomaly?.confidence === "high" ? 75 : 45),
     pid: node.pid,
     ppid: node.ppid,
     process: node.name,
@@ -46,21 +46,21 @@ export default function DrillDownModal({ node, onClose }: { node: ProcessNode; o
                   padding: "2px 8px",
                   borderRadius: 3,
                   background:
-                    (node.anomaly.risk_score ?? 50) >= 90
+                    (node.anomaly.risk_score ?? 45) >= 90
                       ? "rgba(220,38,38,.2)"
-                      : (node.anomaly.risk_score ?? 50) >= 70
+                      : (node.anomaly.risk_score ?? 45) >= 70
                       ? "rgba(234,88,12,.2)"
                       : "rgba(217,119,6,.2)",
                   color:
-                    (node.anomaly.risk_score ?? 50) >= 90
+                    (node.anomaly.risk_score ?? 45) >= 90
                       ? "var(--redl)"
-                      : (node.anomaly.risk_score ?? 50) >= 70
+                      : (node.anomaly.risk_score ?? 45) >= 70
                       ? "#fb923c"
                       : "var(--amberl)",
                   border: "1px solid currentColor",
                 }}
               >
-                SCORE: {node.anomaly.risk_score ?? 85}/100 [{(node.anomaly.severity ?? "high").toUpperCase()}]
+                SCORE: {node.anomaly.risk_score ?? 45}/100 [{(node.anomaly.severity ?? "medium").toUpperCase()}]
               </span>
             )}
             {node.anomaly && <ConfidenceBadge confidence={node.anomaly.confidence} />}
@@ -71,9 +71,14 @@ export default function DrillDownModal({ node, onClose }: { node: ProcessNode; o
           {successMsg && <div style={{ margin: "0 16px 0", padding: "8px 12px", background: "rgba(13,148,136,.1)", border: "1px solid var(--teal)", borderRadius: 4, fontSize: 10, color: "var(--teall)" }}>✓ {successMsg}</div>}
 
           <div className="modal-section">
-            <div className="modal-section-title">IDENTITY & ATTRIBUTION</div>
-            <div className="meta-row"><span className="meta-label">PID</span><span className="meta-val">{node.pid}</span></div>
-            <div className="meta-row"><span className="meta-label">PPID</span><span className="meta-val">{node.ppid}</span></div>
+            <div className="modal-section-title">IDENTITY & LIVE KERNEL METRICS (/proc/{node.pid})</div>
+            <div className="meta-row"><span className="meta-label">PID / PPID</span><span className="meta-val">{node.pid} (Parent: {node.ppid})</span></div>
+            <div className="meta-row"><span className="meta-label">EXEC STATE</span><span className="meta-val" style={{ color: "var(--teall)", fontWeight: 700 }}>{node.state_label || "Sleeping"} ({node.state || "S"})</span></div>
+            <div className="meta-row"><span className="meta-label">CPU / RAM</span><span className="meta-val">{(node.cpu_pct ?? 0).toFixed(1)}% CPU · {((node.mem_rss_kb ?? 0) / 1024).toFixed(2)} MB RSS ({(node.mem_pct ?? 0).toFixed(2)}%)</span></div>
+            <div className="meta-row"><span className="meta-label">THREADS / FDS</span><span className="meta-val">{node.threads ?? 1} Threads · {node.fd_count ?? 0} Open File Descriptors</span></div>
+            {(node.io_read_bytes !== undefined || node.io_write_bytes !== undefined) && (
+              <div className="meta-row"><span className="meta-label">DISK I/O</span><span className="meta-val">Read: {((node.io_read_bytes ?? 0) / 1024).toFixed(1)} KB · Write: {((node.io_write_bytes ?? 0) / 1024).toFixed(1)} KB</span></div>
+            )}
             <div className="meta-row"><span className="meta-label">UID</span><span className="meta-val">{node.uid} ({node.uid === 0 ? "root" : node.uid < 1000 ? "system service" : "standard user"})</span></div>
             <div className="meta-row"><span className="meta-label">FIRST SEEN</span><span className="meta-val">{ts}</span></div>
           </div>
@@ -104,7 +109,7 @@ export default function DrillDownModal({ node, onClose }: { node: ProcessNode; o
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <span style={{ fontSize: 10, fontWeight: 800, color: "var(--redl)", letterSpacing: "0.06em" }}>
-                      ⚡ VIRUS / MALWARE IDENTIFIED
+                      VIRUS / MALWARE IDENTIFIED
                     </span>
                     <span
                       style={{

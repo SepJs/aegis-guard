@@ -53,14 +53,28 @@ export default function ThreatIntelPanel() {
 
       <div style={{ padding: "14px 16px", flex: 1, overflow: "auto" }}>
         <div style={{ fontSize: 9, color: "var(--tx2)", letterSpacing: ".1em", marginBottom: 10, textTransform: "uppercase" }}>Active Feeds</div>
-        {[{ name: "Bundled IOC Feed", entries: stats ? stats.ips + stats.domains + stats.hashes : "…", update: "Ships with binary" },
-          { name: "Abuse.ch URLhaus", entries: "500+", update: "Every 6 hours" },
-          { name: "Custom IOCs", entries: "—", update: "/var/lib/aegis/custom_iocs.json" }].map(feed => (
-          <div key={feed.name} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0", borderBottom: "1px solid var(--border-dim)" }}>
-            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--teall)", flexShrink: 0, boxShadow: "0 0 5px var(--teal)" }} />
-            <span style={{ flex: 1, fontSize: 11, color: "var(--tx0)" }}>{feed.name}</span>
-            <span style={{ fontSize: 9, color: "var(--tx2)" }}>{feed.entries} entries</span>
-            <span style={{ fontSize: 9, color: "var(--tx2)", fontStyle: "italic" }}>{feed.update}</span>
+        {[
+          {
+            name: "Bundled IOC Signatures",
+            entries: stats ? `${stats.ips + stats.cidrs + stats.domains + stats.hashes} indicators` : "Loading…",
+            update: "Embedded + live daemon cache",
+          },
+          {
+            name: "Abuse.ch URLhaus Feed",
+            entries: "6h auto-sync",
+            update: "Malware URL & hash telemetry",
+          },
+          {
+            name: "Local Whitelist & Custom Rules",
+            entries: "Active",
+            update: "Persisted in host data store",
+          },
+        ].map((feed) => (
+          <div key={feed.name} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: "1px solid var(--border-dim)" }}>
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--teall)", flexShrink: 0 }} />
+            <span style={{ flex: 1, fontSize: 12, fontWeight: 500, color: "var(--tx0)" }}>{feed.name}</span>
+            <span style={{ fontSize: 10, fontFamily: "var(--mono)", color: "var(--tx1)" }}>{feed.entries}</span>
+            <span style={{ fontSize: 10, color: "var(--tx2)" }}>{feed.update}</span>
           </div>
         ))}
       </div>

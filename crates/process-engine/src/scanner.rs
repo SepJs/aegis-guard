@@ -28,17 +28,33 @@ async fn run_scanner(tx: mpsc::Sender<ProcEvent>, rules: RuleEngine, path_rules:
         Err(e) => warn!("failed to seed process table: {e}"),
     }
 
+    let mut prev_total_cpu = read_total_cpu_ticks();
     let interval = Duration::from_millis(POLL_INTERVAL_MS);
     loop {
         tokio::time::sleep(interval).await;
-        let current = match snapshot_all() {
+        let now_total_cpu = read_total_cpu_ticks();
+        let cpu_delta = now_total_cpu.saturating_sub(prev_total_cpu).max(1);
+        prev_total_cpu = now_total_cpu;
+
+        let mut current = match snapshot_all() {
             Ok(m)  => m,
             Err(e) => { warn!("snapshot failed: {e}"); continue; }
         };
 
+        for (pid, info) in current.iter_mut() {
+            if let Some(prev) = known.get(pid) {
+                let proc_delta = info.cpu_ticks.saturating_sub(prev.cpu_ticks);
+                info.cpu_pct = ((proc_delta as f64 / cpu_delta as f64) * 100.0) as f32;
+                if prev.state != info.state && (info.state == 'Z' || info.state == 'T') {
+                    let ev = ProcEvent::from_proc(info, ProcEventKind::StateChanged, None);
+                    let _ = tx.send(ev).await;
+                }
+            }
+        }
+
         for (pid, info) in &current {
             if known.contains_key(pid) { continue; }
-            debug!(pid, name = %info.name, "new process");
+            debug!(pid, name = %info.name, state = %info.state_label, "new process");
             let anomaly = rules.evaluate(info, &known)
                 .or_else(|| path_rules.evaluate(info, &known));
             let kind = if anomaly.is_some() { ProcEventKind::Anomaly } else { ProcEventKind::Spawned };
@@ -57,8 +73,20 @@ async fn run_scanner(tx: mpsc::Sender<ProcEvent>, rules: RuleEngine, path_rules:
             }
             known.remove(&pid);
         }
-        for (pid, info) in current { known.insert(pid, info); }
+        known = current;
     }
+}
+
+fn read_total_cpu_ticks() -> u64 {
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(raw) = fs::read_to_string("/proc/stat") {
+            if let Some(first) = raw.lines().next() {
+                return first.split_whitespace().skip(1).filter_map(|s| s.parse::<u64>().ok()).sum();
+            }
+        }
+    }
+    0
 }
 
 pub fn snapshot_all() -> Result<HashMap<u32, ProcInfo>> {
@@ -122,6 +150,12 @@ fn snapshot_windows_wmic() -> Result<HashMap<u32, ProcInfo>> {
             pid,
             ppid,
             name: name.to_string(),
+            state: 'R',
+            state_label: "Running".to_string(),
+            cpu_pct: 0.0,
+            cpu_ticks: 0,
+            mem_rss_kb: 0,
+            threads: 1,
             cmdline: cmd_vec,
             exe: if exe.is_empty() { Some(name.to_string()) } else { Some(exe.to_string()) },
             cwd: None,
@@ -166,6 +200,12 @@ fn snapshot_windows_tasklist() -> Result<HashMap<u32, ProcInfo>> {
                         pid,
                         ppid: 0,
                         name: name.clone(),
+                        state: 'R',
+                        state_label: "Running".to_string(),
+                        cpu_pct: 0.0,
+                        cpu_ticks: 0,
+                        mem_rss_kb: 0,
+                        threads: 1,
                         cmdline: vec![name.clone()],
                         exe: Some(name),
                         cwd: None,
@@ -186,29 +226,50 @@ fn snapshot_fallback() -> Result<HashMap<u32, ProcInfo>> {
 }
 
 #[cfg(target_os = "linux")]
+fn state_char_to_label(c: char) -> String {
+    match c {
+        'R' => "Running".to_string(),
+        'S' => "Sleeping".to_string(),
+        'D' => "Disk Wait".to_string(),
+        'Z' => "Zombie".to_string(),
+        'T' | 't' => "Stopped".to_string(),
+        'I' => "Idle".to_string(),
+        _ => format!("State({})", c),
+    }
+}
+
+#[cfg(target_os = "linux")]
 fn read_proc_info(pid: u32) -> Option<ProcInfo> {
     let base = format!("/proc/{}", pid);
     let status_raw = fs::read_to_string(format!("{}/status", base)).ok()?;
-    let (name, ppid, uid, gid) = parse_status(&status_raw)?;
+    let (name, ppid, uid, gid, state, mem_rss_kb, threads) = parse_status(&status_raw)?;
     let cmdline_raw = fs::read(format!("{}/cmdline", base)).ok()?;
     let cmdline = parse_cmdline(&cmdline_raw);
     let exe = fs::read_link(format!("{}/exe", base)).ok().map(|p| p.to_string_lossy().into_owned());
     let cwd = fs::read_link(format!("{}/cwd", base)).ok().map(|p| p.to_string_lossy().into_owned());
-    let start_time = read_start_time(pid).unwrap_or(0);
-    Some(ProcInfo { pid, ppid, name, cmdline, exe, cwd, uid, gid, start_time })
+    let (start_time, cpu_ticks) = read_stat_metrics(pid).unwrap_or((0, 0));
+    Some(ProcInfo {
+        pid, ppid, name, state, state_label: state_char_to_label(state),
+        cpu_pct: 0.0, cpu_ticks, mem_rss_kb, threads,
+        cmdline, exe, cwd, uid, gid, start_time,
+    })
 }
 
 #[cfg(target_os = "linux")]
-fn parse_status(raw: &str) -> Option<(String, u32, u32, u32)> {
+fn parse_status(raw: &str) -> Option<(String, u32, u32, u32, char, u64, u32)> {
     let (mut name, mut ppid, mut uid, mut gid) = (String::new(), 0u32, 0u32, 0u32);
+    let (mut state, mut rss_kb, mut threads) = ('S', 0u64, 1u32);
     for line in raw.lines() {
-        if      let Some(r) = line.strip_prefix("Name:\t") { name = r.trim().into(); }
-        else if let Some(r) = line.strip_prefix("PPid:\t") { ppid = r.trim().parse().unwrap_or(0); }
-        else if let Some(r) = line.strip_prefix("Uid:\t")  { uid  = r.split_whitespace().next()?.parse().unwrap_or(0); }
-        else if let Some(r) = line.strip_prefix("Gid:\t")  { gid  = r.split_whitespace().next()?.parse().unwrap_or(0); }
+        if      let Some(r) = line.strip_prefix("Name:\t")    { name = r.trim().into(); }
+        else if let Some(r) = line.strip_prefix("State:\t")   { state = r.trim().chars().next().unwrap_or('S'); }
+        else if let Some(r) = line.strip_prefix("PPid:\t")    { ppid = r.trim().parse().unwrap_or(0); }
+        else if let Some(r) = line.strip_prefix("Uid:\t")     { uid  = r.split_whitespace().next()?.parse().unwrap_or(0); }
+        else if let Some(r) = line.strip_prefix("Gid:\t")     { gid  = r.split_whitespace().next()?.parse().unwrap_or(0); }
+        else if let Some(r) = line.strip_prefix("VmRSS:\t")   { rss_kb = r.split_whitespace().next().and_then(|v| v.parse().ok()).unwrap_or(0); }
+        else if let Some(r) = line.strip_prefix("Threads:\t") { threads = r.trim().parse().unwrap_or(1); }
     }
     if name.is_empty() { return None; }
-    Some((name, ppid, uid, gid))
+    Some((name, ppid, uid, gid, state, rss_kb, threads))
 }
 
 #[cfg(target_os = "linux")]
@@ -218,8 +279,12 @@ fn parse_cmdline(raw: &[u8]) -> Vec<String> {
 }
 
 #[cfg(target_os = "linux")]
-fn read_start_time(pid: u32) -> Option<u64> {
+fn read_stat_metrics(pid: u32) -> Option<(u64, u64)> {
     let stat = fs::read_to_string(format!("/proc/{}/stat", pid)).ok()?;
     let after_comm = stat.rfind(')')?;
-    stat[after_comm + 2..].split_whitespace().nth(19)?.parse().ok()
+    let fields: Vec<&str> = stat[after_comm + 2..].split_whitespace().collect();
+    let utime: u64 = fields.get(11)?.parse().ok()?;
+    let stime: u64 = fields.get(12)?.parse().ok()?;
+    let start_time: u64 = fields.get(19)?.parse().ok()?;
+    Some((start_time, utime.saturating_add(stime)))
 }
