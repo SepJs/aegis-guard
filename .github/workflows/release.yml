@@ -91,7 +91,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
+            libayatana-appindicator3-dev \
             librsvg2-dev \
             patchelf \
             pkg-config \
@@ -102,25 +102,27 @@ jobs:
           npm install --no-audit --no-fund
           npm --prefix tauri-app install --no-audit --no-fund
 
+      - name: Create release asset directory
+        run: mkdir -p release-assets
+        shell: bash
+
       - name: Build Go Network Observer (Linux)
         if: matrix.platform == 'linux'
         run: |
-          mkdir -p release-assets
           cd network-observer
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o ../release-assets/aegis-network-observer-linux-amd64 ./cmd/observer
 
-      - name: Build Rust Process Engine Daemon (Linux)
+      - name: Build Rust Process Engine (Linux)
         if: matrix.platform == 'linux'
         run: |
           cargo build --release -p process-engine
-          cp target/release/aegis-process-engine release-assets/aegis-process-engine-linux-amd64
+          install -m 755 target/release/aegis-process-engine release-assets/aegis-process-engine-linux-amd64
 
-      - name: Build Portable Console Tarball (Linux)
+      - name: Build Portable Console Archive (Linux)
         if: matrix.platform == 'linux'
         run: |
           npm run build
-          TAG_NAME="${GITHUB_REF_NAME}"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then TAG_NAME="${{ inputs.tag }}"; fi
+          TAG_NAME="${{ inputs.tag || github.ref_name }}"
           VER="${TAG_NAME#v}"
           tar -czf "release-assets/aegis-guard-console_${VER}_portable.tar.gz" \
             dist server.ts server-security.ts package.json tauri-app/package.json \
@@ -130,7 +132,6 @@ jobs:
         if: matrix.platform == 'windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path release-assets | Out-Null
           Push-Location network-observer
           $env:CGO_ENABLED = "0"
           $env:GOOS = "windows"
@@ -141,7 +142,6 @@ jobs:
       - name: Build Go Network Observer (macOS)
         if: matrix.platform == 'macos'
         run: |
-          mkdir -p release-assets
           cd network-observer
           CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o ../release-assets/aegis-network-observer-darwin-arm64 ./cmd/observer
           CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o ../release-assets/aegis-network-observer-darwin-amd64 ./cmd/observer
@@ -154,8 +154,7 @@ jobs:
         if: matrix.platform == 'linux' && matrix.bundle == 'arch'
         run: |
           mkdir -p release-assets
-          TAG_NAME="${GITHUB_REF_NAME}"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then TAG_NAME="${{ inputs.tag }}"; fi
+          TAG_NAME="${{ inputs.tag || github.ref_name }}"
           VER="${TAG_NAME#v}"
           tar -czf "release-assets/aegis-guard-${VER}-arch-x86_64.tar.gz" \
             dist server.ts server-security.ts package.json tauri-app/package.json \
@@ -164,25 +163,26 @@ jobs:
       - name: Collect Linux Bundles
         if: matrix.platform == 'linux'
         run: |
-          find target tauri-app/src-tauri/target -type f \
+          find tauri-app/src-tauri/target -type f \
             \( -iname "*.deb" -o -iname "*.rpm" -o -iname "*.AppImage" -o -iname "*.tar.gz" -o -iname "*.tar.zst" -o -iname "*.pkg.tar.zst" \) \
-            -exec cp {} release-assets/ \; 2>/dev/null || true
+            -exec cp -f {} release-assets/ \; 2>/dev/null || true
           ls -lh release-assets/
 
       - name: Collect Windows Bundles
         if: matrix.platform == 'windows'
         shell: pwsh
         run: |
-          Get-ChildItem -Path target, tauri-app/src-tauri/target -Recurse -Include *.exe,*.msi -ErrorAction SilentlyContinue |
+          Get-ChildItem -Path tauri-app/src-tauri/target -Recurse -File -Include *.exe,*.msi -ErrorAction SilentlyContinue |
             ForEach-Object { Copy-Item $_.FullName -Destination release-assets/ -Force }
+          if (-not (Get-ChildItem release-assets -File -Include *.exe,*.msi)) { throw 'No Windows installer bundles were produced.' }
           Get-ChildItem release-assets/
 
       - name: Collect macOS Bundles
         if: matrix.platform == 'macos'
         run: |
-          find target tauri-app/src-tauri/target -type f \
+          find tauri-app/src-tauri/target -type f \
             \( -iname "*.dmg" -o -iname "*.app" \) \
-            -exec cp {} release-assets/ \; 2>/dev/null || true
+            -exec cp -f {} release-assets/ \; 2>/dev/null || true
           ls -lh release-assets/
 
       - name: Validate artifact presence
@@ -206,7 +206,7 @@ jobs:
           path: dist-artifacts
           merge-multiple: true
 
-      - name: Validate downloaded artifacts
+      - name: Validate downloaded assets
         run: |
           find dist-artifacts -type f | sed 's#^#/#' | head -200
           test -n "$(find dist-artifacts -type f -print -quit)"
