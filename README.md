@@ -161,7 +161,8 @@ aegis-guard/
 │
 ├── installer/                      # Interactive Rust terminal installer crate
 ├── resources/                      # Desktop entries & systemd templates
-└── proto/                          # Shared protobuf definitions
+├── proto/                          # Shared protobuf definitions
+└── .github/workflows/release.yml   # Automated multi-platform release builds
 ```
 
 ---
