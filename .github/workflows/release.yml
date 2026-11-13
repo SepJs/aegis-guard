@@ -38,7 +38,7 @@ jobs:
         run: npm run build
 
   build:
-    name: Build (${{ matrix.os }})
+    name: Build (${{ matrix.platform }} / ${{ matrix.bundle }})
     needs: verify
     strategy:
       fail-fast: false
@@ -46,13 +46,29 @@ jobs:
         include:
           - os: ubuntu-22.04
             platform: linux
-            bundles: deb,rpm,appimage
+            bundle: deb
+          - os: ubuntu-22.04
+            platform: linux
+            bundle: rpm
+          - os: ubuntu-22.04
+            platform: linux
+            bundle: appimage
+          - os: ubuntu-22.04
+            platform: linux
+            bundle: arch
           - os: windows-latest
             platform: windows
-            bundles: nsis,msi
+            bundle: nsis
+          - os: windows-latest
+            platform: windows
+            bundle: msi
           - os: macos-latest
             platform: macos
-            bundles: dmg,app
+            bundle: dmg
+          - os: macos-latest
+            platform: macos
+            bundle: app
+
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -130,13 +146,27 @@ jobs:
           CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o ../release-assets/aegis-network-observer-darwin-arm64 ./cmd/observer
           CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o ../release-assets/aegis-network-observer-darwin-amd64 ./cmd/observer
 
-      - name: Build Tauri Desktop Bundles
-        run: npm --prefix tauri-app run tauri build -- --bundles ${{ matrix.bundles }}
+      - name: Build Tauri Desktop Bundle
+        if: matrix.platform != 'linux' || matrix.bundle != 'arch'
+        run: npm --prefix tauri-app run tauri build -- --bundles ${{ matrix.bundle }}
+
+      - name: Build Arch portable bundle
+        if: matrix.platform == 'linux' && matrix.bundle == 'arch'
+        run: |
+          mkdir -p release-assets
+          TAG_NAME="${GITHUB_REF_NAME}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then TAG_NAME="${{ inputs.tag }}"; fi
+          VER="${TAG_NAME#v}"
+          tar -czf "release-assets/aegis-guard-${VER}-arch-x86_64.tar.gz" \
+            dist server.ts server-security.ts package.json tauri-app/package.json \
+            installers aegis.sh Makefile README.md INSTALLATION.md
 
       - name: Collect Linux Bundles
         if: matrix.platform == 'linux'
         run: |
-          find target tauri-app/src-tauri/target -type f \( -name "*.deb" -o -name "*.rpm" -o -name "*.AppImage" \) -exec cp {} release-assets/ \; 2>/dev/null || true
+          find target tauri-app/src-tauri/target -type f \
+            \( -iname "*.deb" -o -iname "*.rpm" -o -iname "*.AppImage" -o -iname "*.tar.gz" -o -iname "*.tar.zst" -o -iname "*.pkg.tar.zst" \) \
+            -exec cp {} release-assets/ \; 2>/dev/null || true
           ls -lh release-assets/
 
       - name: Collect Windows Bundles
@@ -144,19 +174,25 @@ jobs:
         shell: pwsh
         run: |
           Get-ChildItem -Path target, tauri-app/src-tauri/target -Recurse -Include *.exe,*.msi -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match "bundle" } |
             ForEach-Object { Copy-Item $_.FullName -Destination release-assets/ -Force }
           Get-ChildItem release-assets/
 
       - name: Collect macOS Bundles
         if: matrix.platform == 'macos'
         run: |
-          find target tauri-app/src-tauri/target -type f -name "*.dmg" -exec cp {} release-assets/ \; 2>/dev/null || true
+          find target tauri-app/src-tauri/target -type f \
+            \( -iname "*.dmg" -o -iname "*.app" \) \
+            -exec cp {} release-assets/ \; 2>/dev/null || true
+          ls -lh release-assets/
+
+      - name: Validate artifact presence
+        run: |
+          test -n "$(ls -1 release-assets 2>/dev/null)"
           ls -lh release-assets/
 
       - uses: actions/upload-artifact@v4
         with:
-          name: release-assets-${{ matrix.platform }}
+          name: release-assets-${{ matrix.platform }}-${{ matrix.bundle }}
           path: release-assets/*
           if-no-files-found: error
 
@@ -169,6 +205,11 @@ jobs:
         with:
           path: dist-artifacts
           merge-multiple: true
+
+      - name: Validate downloaded artifacts
+        run: |
+          find dist-artifacts -type f | sed 's#^#/#' | head -200
+          test -n "$(find dist-artifacts -type f -print -quit)"
 
       - name: Generate SHA-256 Checksums
         run: |
@@ -193,37 +234,5 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: false
-          body: |
-            ## Which File Should I Download?
-
-            | Platform | Recommended Asset | Install / Run |
-            |---|---|---|
-            | **Windows (x64)** | `Aegis-Guard_*_x64-setup.exe` | Double-click installer (or `.msi` for enterprise) |
-            | **macOS (Apple Silicon / Intel)** | `Aegis-Guard_*.dmg` | Open `.dmg` and drag **Aegis-Guard** to Applications |
-            | **Linux (Debian / Ubuntu)** | `Aegis-Guard_*_amd64.deb` | `sudo apt install ./Aegis-Guard_*_amd64.deb` |
-            | **Linux (Fedora / RHEL)** | `Aegis-Guard_*_x86_64.rpm` | `sudo dnf install ./Aegis-Guard_*_x86_64.rpm` |
-            | **Linux (Portable)** | `Aegis-Guard_*_amd64.AppImage` | `chmod +x Aegis-Guard_*_amd64.AppImage && ./Aegis-Guard_*_amd64.AppImage` |
-            | **Headless / Console Mode** | `aegis-guard-console_*_portable.tar.gz` or curl script | Extract and run `npm start` or use the one-liner below |
-
-            Verify binary integrity with `sha256sum -c SHA256SUMS.txt`.
-
-            ---
-
-            ### Quick Console Install
-
-            **Linux:**
-            ```bash
-            curl -fsSL https://raw.githubusercontent.com/SepJs/aegis-guard/${{ steps.meta.outputs.tag }}/installers/install-linux.sh | sudo bash -s -- --console --yes
-            ```
-
-            **macOS:**
-            ```bash
-            curl -fsSL https://raw.githubusercontent.com/SepJs/aegis-guard/${{ steps.meta.outputs.tag }}/installers/install-macos.sh | bash -s -- --console --yes
-            ```
-
-            **Windows (Administrator PowerShell):**
-            ```powershell
-            powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/SepJs/aegis-guard/${{ steps.meta.outputs.tag }}/installers/install-windows.ps1 | iex"
-            ```
           files: |
             dist-artifacts/*
