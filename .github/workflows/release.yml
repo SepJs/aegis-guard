@@ -16,10 +16,11 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  APPIMAGE_EXTRACT_AND_RUN: "1"
 
 jobs:
   verify:
-    name: Run Tests & Web Build
+    name: Verify Tests, Scripts & Web UI
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -31,45 +32,19 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
+      - name: Validate shell scripts
+        run: bash -n aegis.sh install-gui.sh installers/*.sh
+
       - name: Run security engine unit tests
         run: npx --yes tsx --test server-security.test.ts
 
       - name: Build console UI bundle
         run: npm run build
 
-  build:
-    name: Build (${{ matrix.platform }} / ${{ matrix.bundle }})
+  build-linux:
+    name: Build Linux (deb, rpm, AppImage, Arch/amd64, arm64, GTK3)
     needs: verify
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-22.04
-            platform: linux
-            bundle: deb
-          - os: ubuntu-22.04
-            platform: linux
-            bundle: rpm
-          - os: ubuntu-22.04
-            platform: linux
-            bundle: appimage
-          - os: ubuntu-22.04
-            platform: linux
-            bundle: arch
-          - os: windows-latest
-            platform: windows
-            bundle: nsis
-          - os: windows-latest
-            platform: windows
-            bundle: msi
-          - os: macos-latest
-            platform: macos
-            bundle: dmg
-          - os: macos-latest
-            platform: macos
-            bundle: app
-
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
@@ -82,123 +57,319 @@ jobs:
           go-version: "1.22"
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Install Linux native desktop dependencies
-        if: matrix.platform == 'linux'
+      - name: Install Linux desktop, GTK3, RPM, and ARM64 cross-compile dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libglib2.0-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
             patchelf \
             pkg-config \
-            build-essential
+            build-essential \
+            rpm \
+            file \
+            xdg-utils \
+            gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu
 
-      - name: Install JS dependencies
+      - name: Install JS dependencies and build frontend
         run: |
           npm install --no-audit --no-fund
           npm --prefix tauri-app install --no-audit --no-fund
+          npm run build
 
-      - name: Create release asset directory
-        run: mkdir -p release-assets
-        shell: bash
-
-      - name: Build Go Network Observer (Linux)
-        if: matrix.platform == 'linux'
+      - name: Build Go Network Observer (linux-amd64 & linux-arm64)
         run: |
+          mkdir -p release-assets
           cd network-observer
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o ../release-assets/aegis-network-observer-linux-amd64 ./cmd/observer
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o ../release-assets/aegis-network-observer-linux-arm64 ./cmd/observer
 
-      - name: Build Rust Process Engine (Linux)
-        if: matrix.platform == 'linux'
+      - name: Build Rust Process Engine (amd64 + arm64) & GTK3 GUI Installer
         run: |
-          cargo build --release -p process-engine
+          cargo build --release -p process-engine -p aegis-installer
           install -m 755 target/release/aegis-process-engine release-assets/aegis-process-engine-linux-amd64
+          install -m 755 target/release/aegis-installer release-assets/aegis-installer-gtk-linux-amd64
 
-      - name: Build Portable Console Archive (Linux)
-        if: matrix.platform == 'linux'
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
+            cargo build --release -p process-engine --target aarch64-unknown-linux-gnu
+          install -m 755 target/aarch64-unknown-linux-gnu/release/aegis-process-engine release-assets/aegis-process-engine-linux-arm64
+
+      - name: Build Tauri Linux Desktop Bundles (.deb, .rpm, .AppImage)
+        run: npm --prefix tauri-app run tauri build -- --bundles deb,rpm,appimage
+
+      - name: Package Portable Bundles (Arch/x64, arm64, Console) & Collect Linux Packages
         run: |
-          npm run build
           TAG_NAME="${{ inputs.tag || github.ref_name }}"
           VER="${TAG_NAME#v}"
+
+          find target tauri-app/src-tauri/target -type f \( -iname "*.deb" -o -iname "*.rpm" -o -iname "*.AppImage" \) \
+            -exec cp -fv {} release-assets/ \; 2>/dev/null || true
+
+          # Arch / Universal Linux x86_64 full bundle
+          mkdir -p bundle-linux-amd64/target/release
+          cp -r dist server.ts server-security.ts package.json tauri-app installers installer crates network-observer \
+            aegis.sh install-gui.sh Cargo.toml Makefile README.md INSTALLATION.md bundle-linux-amd64/
+          cp release-assets/aegis-process-engine-linux-amd64 bundle-linux-amd64/target/release/aegis-process-engine
+          cp release-assets/aegis-network-observer-linux-amd64 bundle-linux-amd64/target/aegis-network-observer
+          cp release-assets/aegis-installer-gtk-linux-amd64 bundle-linux-amd64/target/release/aegis-installer
+          tar -czf "release-assets/aegis-guard_${VER}_linux-amd64_portable.tar.gz" \
+            --exclude='bundle-linux-amd64/tauri-app/node_modules' \
+            --exclude='bundle-linux-amd64/tauri-app/src-tauri/target' \
+            -C bundle-linux-amd64 .
+
+          # Linux ARM64 (aarch64) full bundle
+          mkdir -p bundle-linux-arm64/target/release
+          cp -r dist server.ts server-security.ts package.json tauri-app installers installer crates network-observer \
+            aegis.sh install-gui.sh Cargo.toml Makefile README.md INSTALLATION.md bundle-linux-arm64/
+          cp release-assets/aegis-process-engine-linux-arm64 bundle-linux-arm64/target/release/aegis-process-engine
+          cp release-assets/aegis-network-observer-linux-arm64 bundle-linux-arm64/target/aegis-network-observer
+          tar -czf "release-assets/aegis-guard_${VER}_linux-arm64_portable.tar.gz" \
+            --exclude='bundle-linux-arm64/tauri-app/node_modules' \
+            --exclude='bundle-linux-arm64/tauri-app/src-tauri/target' \
+            -C bundle-linux-arm64 .
+
+          # Lightweight Console-only tarball
           tar -czf "release-assets/aegis-guard-console_${VER}_portable.tar.gz" \
             dist server.ts server-security.ts package.json tauri-app/package.json \
             installers aegis.sh Makefile README.md INSTALLATION.md
 
-      - name: Build Go Network Observer (Windows)
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          Push-Location network-observer
-          $env:CGO_ENABLED = "0"
-          $env:GOOS = "windows"
-          $env:GOARCH = "amd64"
-          go build -ldflags="-s -w" -o ../release-assets/aegis-network-observer-windows-amd64.exe ./cmd/observer
-          Pop-Location
-
-      - name: Build Go Network Observer (macOS)
-        if: matrix.platform == 'macos'
-        run: |
-          cd network-observer
-          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o ../release-assets/aegis-network-observer-darwin-arm64 ./cmd/observer
-          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o ../release-assets/aegis-network-observer-darwin-amd64 ./cmd/observer
-
-      - name: Build Tauri Desktop Bundle
-        if: matrix.platform != 'linux' || matrix.bundle != 'arch'
-        run: npm --prefix tauri-app run tauri build -- --bundles ${{ matrix.bundle }}
-
-      - name: Build Arch portable bundle
-        if: matrix.platform == 'linux' && matrix.bundle == 'arch'
-        run: |
-          mkdir -p release-assets
-          TAG_NAME="${{ inputs.tag || github.ref_name }}"
-          VER="${TAG_NAME#v}"
-          tar -czf "release-assets/aegis-guard-${VER}-arch-x86_64.tar.gz" \
-            dist server.ts server-security.ts package.json tauri-app/package.json \
-            installers aegis.sh Makefile README.md INSTALLATION.md
-
-      - name: Collect Linux Bundles
-        if: matrix.platform == 'linux'
-        run: |
-          find tauri-app/src-tauri/target -type f \
-            \( -iname "*.deb" -o -iname "*.rpm" -o -iname "*.AppImage" -o -iname "*.tar.gz" -o -iname "*.tar.zst" -o -iname "*.pkg.tar.zst" \) \
-            -exec cp -f {} release-assets/ \; 2>/dev/null || true
-          ls -lh release-assets/
-
-      - name: Collect Windows Bundles
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          Get-ChildItem -Path tauri-app/src-tauri/target -Recurse -File -Include *.exe,*.msi -ErrorAction SilentlyContinue |
-            ForEach-Object { Copy-Item $_.FullName -Destination release-assets/ -Force }
-          if (-not (Get-ChildItem release-assets -File -Include *.exe,*.msi)) { throw 'No Windows installer bundles were produced.' }
-          Get-ChildItem release-assets/
-
-      - name: Collect macOS Bundles
-        if: matrix.platform == 'macos'
-        run: |
-          find tauri-app/src-tauri/target -type f \
-            \( -iname "*.dmg" -o -iname "*.app" \) \
-            -exec cp -f {} release-assets/ \; 2>/dev/null || true
-          ls -lh release-assets/
-
-      - name: Validate artifact presence
-        run: |
           test -n "$(ls -1 release-assets 2>/dev/null)"
           ls -lh release-assets/
 
       - uses: actions/upload-artifact@v4
         with:
-          name: release-assets-${{ matrix.platform }}-${{ matrix.bundle }}
+          name: release-assets-linux
+          path: release-assets/*
+          if-no-files-found: error
+
+  build-macos:
+    name: Build macOS Universal (Apple Silicon + Intel .dmg, .app, GTK3)
+    needs: verify
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install macOS GTK+3 dependencies
+        run: brew install gtk+3 pkg-config
+
+      - name: Install JS dependencies and build frontend
+        run: |
+          npm install --no-audit --no-fund
+          npm --prefix tauri-app install --no-audit --no-fund
+          npm run build
+
+      - name: Build Go Network Observer (arm64, amd64, universal)
+        run: |
+          mkdir -p release-assets
+          cd network-observer
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o ../release-assets/aegis-network-observer-darwin-arm64 ./cmd/observer
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o ../release-assets/aegis-network-observer-darwin-amd64 ./cmd/observer
+          lipo -create -output ../release-assets/aegis-network-observer-darwin-universal \
+            ../release-assets/aegis-network-observer-darwin-arm64 \
+            ../release-assets/aegis-network-observer-darwin-amd64
+
+      - name: Build Rust Process Engine (universal) & GTK3 GUI Installer (macOS)
+        run: |
+          cargo build --release -p process-engine --target aarch64-apple-darwin
+          cargo build --release -p process-engine --target x86_64-apple-darwin
+          lipo -create -output release-assets/aegis-process-engine-darwin-universal \
+            target/aarch64-apple-darwin/release/aegis-process-engine \
+            target/x86_64-apple-darwin/release/aegis-process-engine
+          chmod +x release-assets/aegis-process-engine-darwin-universal
+
+          cargo build --release -p aegis-installer
+          tar -czf release-assets/aegis-installer-gtk-macos-arm64.tar.gz -C target/release aegis-installer
+
+      - name: Build Tauri Universal macOS Desktop Bundles (.dmg + .app)
+        run: npm --prefix tauri-app run tauri build -- --target universal-apple-darwin --bundles dmg,app
+
+      - name: Collect macOS Bundles & Package Portable Archive
+        run: |
+          TAG_NAME="${{ inputs.tag || github.ref_name }}"
+          VER="${TAG_NAME#v}"
+
+          find target tauri-app/src-tauri/target -type f -iname "*.dmg" -exec cp -fv {} release-assets/ \; 2>/dev/null || true
+          APP_BUNDLE=$(find target tauri-app/src-tauri/target -type d -name "Aegis-Guard.app" | head -n 1)
+          if [ -n "$APP_BUNDLE" ]; then
+            tar -czf "release-assets/Aegis-Guard_${VER}_macos-universal.app.tar.gz" -C "$(dirname "$APP_BUNDLE")" "Aegis-Guard.app"
+          fi
+
+          mkdir -p bundle-darwin/target/release
+          cp -r dist server.ts server-security.ts package.json tauri-app installers installer crates network-observer \
+            aegis.sh install-gui.sh Cargo.toml Makefile README.md INSTALLATION.md bundle-darwin/
+          cp release-assets/aegis-process-engine-darwin-universal bundle-darwin/target/release/aegis-process-engine
+          cp release-assets/aegis-network-observer-darwin-universal bundle-darwin/target/aegis-network-observer
+          cp target/release/aegis-installer bundle-darwin/target/release/aegis-installer
+          tar -czf "release-assets/aegis-guard_${VER}_macos-universal_portable.tar.gz" \
+            --exclude='bundle-darwin/tauri-app/node_modules' \
+            --exclude='bundle-darwin/tauri-app/src-tauri/target' \
+            -C bundle-darwin .
+
+          test -n "$(ls -1 release-assets 2>/dev/null)"
+          ls -lh release-assets/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-macos
+          path: release-assets/*
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows (x64 NSIS/.msi, arm64, Portable ZIP, GTK3)
+    needs: verify
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc,x86_64-pc-windows-gnu
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Setup MSYS2 GTK3 toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: mingw64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gtk3
+            mingw-w64-x86_64-librsvg
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-gcc
+
+      - name: Install JS dependencies and build frontend
+        run: |
+          npm install --no-audit --no-fund
+          npm --prefix tauri-app install --no-audit --no-fund
+          npm run build
+
+      - name: Build Go Network Observer (windows-amd64 & windows-arm64)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release-assets | Out-Null
+          Push-Location network-observer
+          $env:CGO_ENABLED = "0"
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          go build -ldflags="-s -w" -o ../release-assets/aegis-network-observer-windows-amd64.exe ./cmd/observer
+          $env:GOARCH = "arm64"
+          go build -ldflags="-s -w" -o ../release-assets/aegis-network-observer-windows-arm64.exe ./cmd/observer
+          Pop-Location
+
+      - name: Build Rust Process Engine (windows-amd64 & windows-arm64)
+        shell: pwsh
+        run: |
+          cargo build --release -p process-engine --target x86_64-pc-windows-msvc
+          Copy-Item target/x86_64-pc-windows-msvc/release/aegis-process-engine.exe release-assets/aegis-process-engine-windows-amd64.exe -Force
+          cargo build --release -p process-engine --target aarch64-pc-windows-msvc
+          Copy-Item target/aarch64-pc-windows-msvc/release/aegis-process-engine.exe release-assets/aegis-process-engine-windows-arm64.exe -Force
+
+      - name: Build Self-Contained Windows GTK3 GUI Installer (mingw64)
+        shell: msys2 {0}
+        run: |
+          export PATH="$HOME/.cargo/bin:/mingw64/bin:$PATH"
+          cargo build --release -p aegis-installer --target x86_64-pc-windows-gnu
+          rm -rf pkg-win-gtk
+          mkdir -p pkg-win-gtk/share/glib-2.0/schemas pkg-win-gtk/lib
+          cp target/x86_64-pc-windows-gnu/release/aegis-installer.exe pkg-win-gtk/
+          cp tauri-app/src-tauri/icons/icon.ico pkg-win-gtk/
+          ldd pkg-win-gtk/aegis-installer.exe | grep -i '/mingw64/bin/' | awk '{print $3}' | sort -u | xargs -r -I{} cp -u "{}" pkg-win-gtk/
+          for dll in /mingw64/bin/librsvg-*.dll /mingw64/bin/libxml2-*.dll /mingw64/bin/libgdk_pixbuf-*.dll /mingw64/bin/libbrotli*.dll; do
+            [ -f "$dll" ] && cp -u "$dll" pkg-win-gtk/
+          done
+          cp -r /mingw64/share/glib-2.0/schemas/* pkg-win-gtk/share/glib-2.0/schemas/
+          glib-compile-schemas pkg-win-gtk/share/glib-2.0/schemas
+          cp -r /mingw64/lib/gdk-pixbuf-2.0 pkg-win-gtk/lib/
+          if command -v gdk-pixbuf-query-loaders.exe >/dev/null 2>&1; then
+            LOADER_DIR=$(find pkg-win-gtk/lib/gdk-pixbuf-2.0 -type d -name loaders | head -n1)
+            if [ -n "$LOADER_DIR" ]; then
+              CACHE_FILE="$(dirname "$LOADER_DIR")/loaders.cache"
+              GDK_PIXBUF_MODULEDIR=/mingw64/lib/gdk-pixbuf-2.0/2.10.0/loaders gdk-pixbuf-query-loaders.exe \
+                | sed -E 's|"[^"]*lib/gdk-pixbuf-2\.0/|"lib/gdk-pixbuf-2.0/|g' > "$CACHE_FILE" || true
+            fi
+          fi
+
+      - name: Build Tauri Desktop Bundles (x64 NSIS/.msi + arm64 binary)
+        shell: pwsh
+        run: |
+          npm --prefix tauri-app run tauri build -- --target x86_64-pc-windows-msvc --bundles nsis,msi
+          npm --prefix tauri-app run tauri build -- --target aarch64-pc-windows-msvc --no-bundle
+
+      - name: Collect Windows Bundles & Package Portable ZIPs
+        shell: pwsh
+        run: |
+          $tagName = "${{ inputs.tag || github.ref_name }}"
+          $ver = $tagName.TrimStart('v')
+
+          Compress-Archive -Path "pkg-win-gtk/*" -DestinationPath "release-assets/aegis-installer-gtk-windows-amd64.zip" -Force
+
+          Get-ChildItem -Path target, tauri-app/src-tauri/target -Recurse -File -Include *.exe,*.msi -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "bundle" } |
+            ForEach-Object { Copy-Item $_.FullName -Destination release-assets/ -Force }
+
+          if (-not (Get-ChildItem release-assets -File -Include *.exe,*.msi)) {
+            throw 'No Windows installer bundles were produced.'
+          }
+
+          $win64 = "bundle-win-amd64"
+          New-Item -ItemType Directory -Force -Path "$win64" | Out-Null
+          Copy-Item target/x86_64-pc-windows-msvc/release/Aegis-Guard.exe "$win64/" -Force
+          Copy-Item release-assets/aegis-process-engine-windows-amd64.exe "$win64/aegis-process-engine.exe" -Force
+          Copy-Item release-assets/aegis-network-observer-windows-amd64.exe "$win64/aegis-network-observer.exe" -Force
+          Copy-Item -Recurse dist, installers, server.ts, server-security.ts, package.json "$win64/" -Force
+          Compress-Archive -Path "$win64/*" -DestinationPath "release-assets/aegis-guard_${ver}_windows-amd64_portable.zip" -Force
+
+          $winArm = "bundle-win-arm64"
+          New-Item -ItemType Directory -Force -Path "$winArm" | Out-Null
+          Copy-Item target/aarch64-pc-windows-msvc/release/Aegis-Guard.exe "$winArm/" -Force
+          Copy-Item release-assets/aegis-process-engine-windows-arm64.exe "$winArm/aegis-process-engine.exe" -Force
+          Copy-Item release-assets/aegis-network-observer-windows-arm64.exe "$winArm/aegis-network-observer.exe" -Force
+          Copy-Item -Recurse dist, installers, server.ts, server-security.ts, package.json "$winArm/" -Force
+          Compress-Archive -Path "$winArm/*" -DestinationPath "release-assets/aegis-guard_${ver}_windows-arm64_portable.zip" -Force
+
+          Get-ChildItem release-assets/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-windows
           path: release-assets/*
           if-no-files-found: error
 
   publish:
     name: Publish GitHub Release
-    needs: build
+    needs: [build-linux, build-macos, build-windows]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/download-artifact@v4
@@ -208,7 +379,7 @@ jobs:
 
       - name: Validate downloaded assets
         run: |
-          find dist-artifacts -type f | sed 's#^#/#' | head -200
+          ls -lh dist-artifacts
           test -n "$(find dist-artifacts -type f -print -quit)"
 
       - name: Generate SHA-256 Checksums
@@ -230,9 +401,27 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           name: "Aegis-Guard ${{ steps.meta.outputs.tag }} — Endpoint Security & Network IDS"
           draft: false
           prerelease: false
           generate_release_notes: false
+          body: |
+            ## Which File Should I Download?
+
+            | Platform | Recommended Asset | Install / Run |
+            |---|---|---|
+            | **GTK3 GUI Installer (Windows x64)** | `aegis-installer-gtk-windows-amd64.zip` | Extract ZIP and double-click `aegis-installer.exe` |
+            | **GTK3 GUI Installer (Linux amd64)** | `aegis-installer-gtk-linux-amd64` | `chmod +x aegis-installer-gtk-linux-amd64 && ./aegis-installer-gtk-linux-amd64` |
+            | **GTK3 GUI Installer (macOS)** | `aegis-installer-gtk-macos-arm64.tar.gz` | Extract and run `./aegis-installer` |
+            | **Windows Desktop Installer (x64)** | `Aegis-Guard_*_x64-setup.exe` | Double-click NSIS installer (or `.msi` for enterprise) |
+            | **Windows Portable (x64 / ARM64)** | `aegis-guard_*_windows-amd64_portable.zip` / `windows-arm64_portable.zip` | Extract ZIP and launch `Aegis-Guard.exe` |
+            | **macOS Universal (Apple Silicon & Intel)** | `Aegis-Guard_*_universal.dmg` | Open `.dmg` and drag **Aegis-Guard** to Applications |
+            | **Linux (Debian / Ubuntu / Mint / Kali)** | `Aegis-Guard_*_amd64.deb` | `sudo apt install ./Aegis-Guard_*_amd64.deb` |
+            | **Linux (Fedora / RHEL / Rocky / openSUSE)** | `Aegis-Guard_*_x86_64.rpm` | `sudo dnf install ./Aegis-Guard_*_x86_64.rpm` |
+            | **Linux Universal (Arch / Alpine / Any)** | `Aegis-Guard_*_amd64.AppImage` | `chmod +x Aegis-Guard_*_amd64.AppImage && ./Aegis-Guard_*_amd64.AppImage` |
+            | **Linux Portable (Arch x86_64 / ARM64 / Console)** | `aegis-guard_*_linux-amd64_portable.tar.gz` / `linux-arm64_portable.tar.gz` | Extract and run `bash aegis.sh --console` or `bash install-gui.sh` |
+
+            Verify binary integrity with `sha256sum -c SHA256SUMS.txt`.
           files: |
             dist-artifacts/*
