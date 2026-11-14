@@ -127,13 +127,32 @@ if [ "$LAUNCH_MODE" = "desktop" ]; then
 
     [ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env" || true
     if command -v cargo &>/dev/null && [ -d "tauri-app" ]; then
-        echo -e "${CYAN}[desktop] Starting Tauri dev shell...${RESET}"
-        cd tauri-app
-        [ ! -d "node_modules" ] && npm install --no-audit --no-fund
-        AEGIS_SOCKET="$AEGIS_SOCKET" AEGIS_NET="${AEGIS_NET:-1}" cargo tauri dev
-        exit $?
+        if [ ! -f "tauri-app/dist/index.html" ]; then
+            echo -e "${CYAN}[desktop] Building frontend UI assets...${RESET}"
+            npm --prefix tauri-app install --no-audit --no-fund || true
+            npm --prefix tauri-app run build || true
+        fi
+        if [ -f "tauri-app/dist/index.html" ]; then
+            echo -e "${CYAN}[desktop] Building native Aegis-Guard binary with cargo...${RESET}"
+            if cargo build --release -p aegis-guard; then
+                for built in "${SCRIPT_DIR}/target/release/Aegis-Guard" "${SCRIPT_DIR}/tauri-app/src-tauri/target/release/Aegis-Guard"; do
+                    if [ -x "$built" ]; then
+                        echo -e "${GREEN}[desktop] Launching native Aegis-Guard (${built})...${RESET}"
+                        "$built"
+                        exit $?
+                    fi
+                done
+            fi
+        fi
+        if command -v cargo-tauri &>/dev/null; then
+            echo -e "${CYAN}[desktop] Starting Tauri dev shell via cargo-tauri...${RESET}"
+            (cd tauri-app && AEGIS_SOCKET="$AEGIS_SOCKET" AEGIS_NET="${AEGIS_NET:-1}" cargo tauri dev) && exit 0 || true
+        elif [ -x "tauri-app/node_modules/.bin/tauri" ]; then
+            echo -e "${CYAN}[desktop] Starting Tauri dev shell via local @tauri-apps/cli...${RESET}"
+            (cd tauri-app && AEGIS_SOCKET="$AEGIS_SOCKET" AEGIS_NET="${AEGIS_NET:-1}" ./node_modules/.bin/tauri dev) && exit 0 || true
+        fi
     fi
-    echo -e "${YELLOW}[desktop] Native binary not found — falling back to web console UI on http://127.0.0.1:3000${RESET}"
+    echo -e "${YELLOW}[desktop] Native desktop unavailable — falling back to web console UI on http://127.0.0.1:${PORT:-3000}${RESET}"
     OPEN_BROWSER=1
 fi
 

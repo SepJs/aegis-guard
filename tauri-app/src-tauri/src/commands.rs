@@ -106,15 +106,28 @@ pub async fn scan_entropy(
     path: Option<String>,
     content: Option<serde_json::Value>,
 ) -> Res<ScanSummary> {
+    let sample_path = request
+        .as_ref()
+        .map(|r| r.path.clone())
+        .or(path)
+        .unwrap_or_else(|| "uploaded_sample.bin".into());
+
+    if let Some(c) = content {
+        let bytes = extract_bytes(&c);
+        if !bytes.is_empty() {
+            return tokio::task::spawn_blocking(move || entropy::scan_bytes(&sample_path, &bytes))
+                .await
+                .map_err(je);
+        }
+    }
+
     let req = if let Some(r) = request {
         r
     } else {
-        let bytes = content.map(|c| extract_bytes(&c));
         ScanRequest {
-            path: path.unwrap_or_else(|| "uploaded_sample.bin".into()),
-            max_bytes: Some(32 * 1024 * 1024),
+            path: sample_path,
+            max_bytes: 32 * 1024 * 1024,
             recursive: true,
-            content: bytes,
         }
     };
     tokio::task::spawn_blocking(move || entropy::scan_path(req).map_err(je))
@@ -1786,6 +1799,13 @@ fn extract_bytes(val: &serde_json::Value) -> Vec<u8> {
         arr.iter()
             .filter_map(|v| v.as_u64().map(|n| n as u8))
             .collect()
+    } else if let Some(obj) = val.as_object() {
+        let mut pairs: Vec<(usize, u8)> = obj
+            .iter()
+            .filter_map(|(k, v)| Some((k.parse::<usize>().ok()?, v.as_u64()? as u8)))
+            .collect();
+        pairs.sort_by_key(|(idx, _)| *idx);
+        pairs.into_iter().map(|(_, b)| b).collect()
     } else {
         Vec::new()
     }
