@@ -49,7 +49,7 @@ pub async fn quarantine_process(pid: u32, name: String) -> Result<ActionResult, 
         }
     }
 
-    let mut isolation_notes: Vec<&'static str> = Vec::new();
+    let mut isolation_notes: Vec<String> = Vec::new();
 
     #[cfg(target_os = "linux")]
     {
@@ -62,7 +62,7 @@ pub async fn quarantine_process(pid: u32, name: String) -> Result<ActionResult, 
             if std::fs::create_dir_all(fp).is_ok() {
                 let _ = std::fs::write(format!("{}/cgroup.procs", fp), pid.to_string());
                 let _ = std::fs::write(format!("{}/freezer.state", fp), "FROZEN");
-                isolation_notes.push("cgroup freezer");
+                isolation_notes.push("cgroup freezer".to_string());
                 break;
             }
         }
@@ -73,7 +73,7 @@ pub async fn quarantine_process(pid: u32, name: String) -> Result<ActionResult, 
             .output()
             .await;
         match output {
-            Ok(o) if o.status.success() => isolation_notes.push("netns lo-down"),
+            Ok(o) if o.status.success() => isolation_notes.push("netns lo-down".to_string()),
             Ok(o) => {
                 let stderr = String::from_utf8_lossy(&o.stderr);
                 warn!(pid, "nsenter failed ({}): {} — continuing with other isolation", o.status, stderr.trim());
@@ -97,7 +97,7 @@ pub async fn quarantine_process(pid: u32, name: String) -> Result<ActionResult, 
         let _ = Command::new("netsh")
             .args(["advfirewall", "firewall", "add", "rule", &format!("name={}-in", rule_name), "dir=in", "action=block"])
             .output().await;
-        isolation_notes.push("Windows firewall block (in+out)");
+        isolation_notes.push("Windows firewall block (in+out)".to_string());
     }
 
     #[cfg(all(unix, not(target_os = "linux")))]
@@ -108,7 +108,7 @@ pub async fn quarantine_process(pid: u32, name: String) -> Result<ActionResult, 
             .await
         {
             if o.status.success() {
-                isolation_notes.push("SIGSTOP suspend");
+                isolation_notes.push("SIGSTOP suspend".to_string());
             }
         }
     }
