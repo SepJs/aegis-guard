@@ -1,3 +1,5 @@
+import { listen as tauriListen, emit as tauriEmit } from "@tauri-apps/api/event";
+
 type UnlistenFn = () => void;
 type EventHandler<T = any> = (event: { event: string; payload: T }) => void;
 
@@ -27,12 +29,11 @@ export function isIpcStreamConnected(): boolean {
 export function isNativeTauriRuntime(): boolean {
   return (
     typeof window !== "undefined" &&
-    Boolean((window as any).__TAURI_INTERNALS__) &&
-    Boolean((window as any).__TAURI__?.event?.listen)
+    Boolean((window as any).__TAURI_INTERNALS__ || (window as any).__TAURI__?.event?.listen)
   );
 }
 
-// Connect to real-time SSE event stream from the backend engine
+// Connect to real-time SSE event stream from the backend engine (browser/console mode only)
 if (typeof window !== "undefined" && !isNativeTauriRuntime() && typeof EventSource !== "undefined") {
   try {
     const es = new EventSource("/api/events");
@@ -90,7 +91,10 @@ export async function listen<T = any>(
   // If running inside native Tauri runtime, bind directly to Tauri IPC event bus
   if (isNativeTauriRuntime()) {
     try {
-      return await (window as any).__TAURI__.event.listen(event, handler);
+      if ((window as any).__TAURI__?.event?.listen) {
+        return await (window as any).__TAURI__.event.listen(event, handler);
+      }
+      return await tauriListen<T>(event, (ev) => handler({ event: ev.event, payload: ev.payload }));
     } catch (e) {
       console.warn(`Tauri native listen(${event}) failed:`, e);
     }
@@ -113,13 +117,13 @@ export async function listen<T = any>(
 }
 
 export async function emit<T = any>(event: string, payload: T): Promise<void> {
-  if (
-    typeof window !== "undefined" &&
-    (window as any).__TAURI_INTERNALS__ &&
-    (window as any).__TAURI__?.event?.emit
-  ) {
+  if (isNativeTauriRuntime()) {
     try {
-      await (window as any).__TAURI__.event.emit(event, payload);
+      if ((window as any).__TAURI__?.event?.emit) {
+        await (window as any).__TAURI__.event.emit(event, payload);
+      } else {
+        await tauriEmit(event, payload);
+      }
       return;
     } catch {
       // Fall through to local dispatch

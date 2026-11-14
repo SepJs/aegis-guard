@@ -76,7 +76,7 @@ fn handle_net_event(ev: NetEvent, state: &Arc<AppState>, app: &AppHandle) {
             risk_score: match alert.confidence.as_str() { "high" => 90.0, "medium" => 60.0, _ => 30.0 },
             pid: ev.pid, ppid: 0, process: ev.process.clone(), cmdline: vec![], exe_path: None,
             rule: alert.rule.clone(), confidence: alert.confidence.clone(), reason: alert.reason.clone(),
-            ancestors: vec![], ts: Utc.timestamp_millis_opt(ev.ts_ms).unwrap(), resolved: false, digest: String::new(),
+            ancestors: vec![], ts: Utc.timestamp_millis_opt(ev.ts_ms).single().unwrap_or_else(Utc::now), resolved: false, digest: String::new(),
         };
         match state.journal.lock() {
             Ok(j) => match j.insert_incident(incident) {

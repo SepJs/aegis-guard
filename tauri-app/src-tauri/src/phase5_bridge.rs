@@ -48,7 +48,7 @@ pub async fn start(state: Arc<AppState>, app: AppHandle, data_dir: std::path::Pa
                 pid: std::process::id(), ppid: 0, process: "aegis-process-engine".into(),
                 cmdline: vec![], exe_path: None, rule: format!("{:?}", ev.kind),
                 confidence: ev.confidence.clone(), reason: ev.reason.clone(), ancestors: vec![],
-                ts: Utc.timestamp_millis_opt(ev.ts).unwrap(), resolved: false, digest: String::new(),
+                ts: Utc.timestamp_millis_opt(ev.ts).single().unwrap_or_else(Utc::now), resolved: false, digest: String::new(),
             };
             if let Ok(j) = st3.journal.lock() {
                 if let Ok(saved) = j.insert_incident(incident) { let _ = app3.emit("anomaly", &saved); }
@@ -90,7 +90,7 @@ pub async fn start(state: Arc<AppState>, app: AppHandle, data_dir: std::path::Pa
                         confidence: ev.confidence.clone(),
                         reason: ev.reason.clone(),
                         ancestors: vec![],
-                        ts: Utc.timestamp_millis_opt(ev.ts).unwrap(),
+                        ts: Utc.timestamp_millis_opt(ev.ts).single().unwrap_or_else(Utc::now),
                         resolved: false,
                         digest: String::new(),
                     };
@@ -129,7 +129,7 @@ pub async fn start(state: Arc<AppState>, app: AppHandle, data_dir: std::path::Pa
                         confidence: ev.confidence.clone(),
                         reason: ev.reason.clone(),
                         ancestors: vec![],
-                        ts: Utc.timestamp_millis_opt(ev.ts).unwrap(),
+                        ts: Utc.timestamp_millis_opt(ev.ts).single().unwrap_or_else(Utc::now),
                         resolved: false,
                         digest: String::new(),
                     };
@@ -161,7 +161,7 @@ async fn behavioral_scan_loop(engine: Arc<BehaviorEngine>, state: Arc<AppState>,
                     risk_score: anomaly.anomaly_score,
                     pid: anomaly.pid, ppid: 0, process: anomaly.name.clone(), cmdline: vec![], exe_path: None,
                     rule: "BEH-001".into(), confidence: anomaly.confidence.clone(), reason: anomaly.reason.clone(),
-                    ancestors: vec![], ts: Utc.timestamp_millis_opt(anomaly.ts).unwrap(), resolved: false, digest: String::new(),
+                    ancestors: vec![], ts: Utc.timestamp_millis_opt(anomaly.ts).single().unwrap_or_else(Utc::now), resolved: false, digest: String::new(),
                 };
                 if let Ok(j) = state.journal.lock() {
                     if let Ok(saved) = j.insert_incident(incident) { let _ = app.emit("anomaly", &saved); }

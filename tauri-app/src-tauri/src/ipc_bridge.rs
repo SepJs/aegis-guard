@@ -10,14 +10,36 @@ use crate::state::AppState;
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, Clone)]
 pub struct ProcEvent {
-    pub id: String, pub kind: String, pub pid: u32, pub ppid: u32, pub name: String,
-    pub cmdline: Vec<String>, pub exe: Option<String>, pub cwd: Option<String>,
-    pub uid: u32, pub gid: u32, pub start_time: u64,
-    pub anomaly: Option<AnomalyDetail>, pub ts: i64,
+    pub id: String,
+    pub kind: String,
+    pub pid: u32,
+    pub ppid: u32,
+    pub name: String,
+    #[serde(default)] pub state: char,
+    #[serde(default)] pub state_label: String,
+    #[serde(default)] pub cpu_pct: f32,
+    #[serde(default)] pub mem_rss_kb: u64,
+    #[serde(default)] pub threads: u32,
+    #[serde(default)] pub cmdline: Vec<String>,
+    pub exe: Option<String>,
+    pub cwd: Option<String>,
+    #[serde(default)] pub uid: u32,
+    #[serde(default)] pub gid: u32,
+    #[serde(default)] pub start_time: u64,
+    pub anomaly: Option<AnomalyDetail>,
+    pub ts: i64,
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, Clone)]
-pub struct AnomalyDetail { pub rule: String, pub confidence: String, pub reason: String, pub parent_exe: Option<String>, pub ancestors: Vec<u32> }
+pub struct AnomalyDetail {
+    pub rule: String,
+    pub confidence: String,
+    #[serde(default)] pub priority_tier: String,
+    #[serde(default)] pub risk_score: u8,
+    pub reason: String,
+    pub parent_exe: Option<String>,
+    #[serde(default)] pub ancestors: Vec<u32>,
+}
 
 pub async fn run(socket_path: String, state: Arc<AppState>, app: AppHandle) {
     loop {
@@ -61,7 +83,7 @@ fn handle_event(event: ProcEvent, state: &Arc<AppState>, app: &AppHandle) {
             pid: event.pid, ppid: event.ppid, process: event.name.clone(),
             cmdline: event.cmdline.clone(), exe_path: event.exe.clone(),
             rule: anomaly.rule.clone(), confidence: anomaly.confidence.clone(), reason: anomaly.reason.clone(),
-            ancestors: anomaly.ancestors.clone(), ts: Utc.timestamp_millis_opt(event.ts).unwrap(),
+            ancestors: anomaly.ancestors.clone(), ts: Utc.timestamp_millis_opt(event.ts).single().unwrap_or_else(Utc::now),
             resolved: false, digest: String::new(),
         };
 

@@ -168,10 +168,63 @@ func (m *Monitor) emit(conn ProcessConn, txBytes uint64, rxBytes uint64) {
 }
 
 func (m *Monitor) snapshot() (map[uint64]ProcessConn, error) {
-	if runtime.GOOS == "windows" {
+	switch runtime.GOOS {
+	case "windows":
 		return m.snapshotWindows()
+	case "darwin":
+		return m.snapshotDarwin()
+	default:
+		return m.snapshotLinux()
 	}
-	return m.snapshotLinux()
+}
+
+func (m *Monitor) snapshotDarwin() (map[uint64]ProcessConn, error) {
+	result := make(map[uint64]ProcessConn)
+	cmd := exec.Command("lsof", "-i", "-n", "-P")
+	output, err := cmd.Output()
+	if err != nil {
+		return result, nil
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+	scanner.Scan() // skip header
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 9 {
+			continue
+		}
+		procName := fields[0]
+		pid64, err := strconv.ParseUint(fields[1], 10, 32)
+		if err != nil || pid64 == 0 {
+			continue
+		}
+		pid := uint32(pid64)
+		proto := strings.ToLower(fields[7])
+		nameCol := fields[8]
+		arrow := strings.Index(nameCol, "->")
+		if arrow < 0 {
+			continue
+		}
+		localIP, localPort := parseHostPort(nameCol[:arrow])
+		remoteIP, remotePort := parseHostPort(nameCol[arrow+2:])
+		h := uint64(localPort)<<32 | uint64(remotePort)<<16 | uint64(pid&0xFFFF)
+		conn := Connection{
+			Inode:      h,
+			LocalIP:    localIP,
+			LocalPort:  localPort,
+			RemoteIP:   remoteIP,
+			RemotePort: remotePort,
+			Protocol:   proto,
+			State:      "ESTABLISHED",
+			UID:        501,
+		}
+		result[h] = ProcessConn{
+			Connection: conn,
+			PID:        pid,
+			Process:    procName,
+		}
+	}
+	return result, nil
 }
 
 func (m *Monitor) snapshotLinux() (map[uint64]ProcessConn, error) {

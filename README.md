@@ -65,7 +65,16 @@
 
 ---
 
-## Multi-Platform Installation (Console & Desktop)
+## Multi-Platform Installation (GTK3 GUI, Desktop & Console)
+
+### Option A — Cross-Platform GTK3 GUI Installer (Linux / Windows / macOS)
+Open the visual dark-themed installer window to choose **Desktop** or **Console** mode, browse install path, stream build progress, and launch directly:
+```bash
+git clone https://github.com/SepJs/aegis-guard.git
+cd aegis-guard
+bash install-gui.sh
+```
+On **Windows**, extract `aegis-installer-gtk-windows-amd64.zip` from GitHub Releases and double-click `aegis-installer.exe`.
 
 ### Linux (Debian / Ubuntu / Fedora / Arch / openSUSE)
 ```bash
@@ -129,6 +138,7 @@ aegis-guard/
 ├── Makefile                        # Build & console targets (`make run-console`)
 ├── package.json                    # Root server & frontend scripts (v1.2.0)
 ├── aegis.sh                        # Cross-platform Unix console/desktop launcher
+├── install-gui.sh                  # Cross-platform GTK3 GUI installer bootstrap
 ├── server.ts                       # Node/Express IPC, telemetry & live AV server
 ├── server-security.ts              # 24 AV signatures, Shannon entropy & threat scoring
 ├── server-security.test.ts         # Unit tests for AV detection & scoring logic
@@ -155,11 +165,12 @@ aegis-guard/
 │   ├── install-macos.sh            # macOS Console & Desktop installer
 │   ├── install-windows.ps1         # Windows PowerShell installer
 │   ├── install-windows.bat         # Windows batch wrapper
+│   ├── launch-gtk-installer.sh     # GTK3 dependency + GUI installer launcher
 │   ├── install-desktop-launcher.sh # Linux .desktop shortcut helper
 │   ├── setup-systemd.sh            # Systemd service setup
 │   └── uninstall-linux.sh          # Clean Linux uninstaller
 │
-├── installer/                      # Interactive Rust terminal installer crate
+├── installer/                      # Cross-platform GTK3 GUI + CLI installer crate
 ├── resources/                      # Desktop entries & systemd templates
 ├── proto/                          # Shared protobuf definitions
 └── .github/workflows/release.yml   # Automated multi-platform release builds

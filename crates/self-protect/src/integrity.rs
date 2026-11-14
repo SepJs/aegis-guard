@@ -24,8 +24,9 @@ impl IntegrityMonitor {
 }
 
 async fn socket_journal_monitor(tx: mpsc::Sender<SelfProtectEvent>) {
-    let _socket_meta = std::fs::metadata(SOCKET_PATH).ok();
-    let journal_hash = hash_file_if_exists(JOURNAL_PATH);
+    let socket_path = std::env::var("AEGIS_SOCKET").unwrap_or_else(|_| SOCKET_PATH.to_string());
+    let _socket_meta = std::fs::metadata(&socket_path).ok();
+    let _journal_hash = hash_file_if_exists(JOURNAL_PATH);
 
     let mut interval = tokio::time::interval(Duration::from_secs(CHECK_INTERVAL));
     interval.tick().await;
@@ -33,18 +34,15 @@ async fn socket_journal_monitor(tx: mpsc::Sender<SelfProtectEvent>) {
     loop {
         interval.tick().await;
         #[cfg(unix)]
-        if let Ok(meta) = std::fs::metadata(SOCKET_PATH) {
-            use std::os::unix::fs::FileTypeExt;
-            if !meta.file_type().is_socket() {
-                let ev = make_event(SelfProtectKind::SocketTampered,
-                    format!("IPC socket at '{}' has been replaced with a non-socket file. An attacker may have replaced the socket to intercept security engine communications.", SOCKET_PATH),
-                    format!("path={}", SOCKET_PATH));
-                let _ = tx.send(ev).await;
-            }
-        }
-        if let Some(ref baseline_h) = journal_hash {
-            if let Some(current_h) = hash_file_if_exists(JOURNAL_PATH) {
-                let _ = (baseline_h, current_h);
+        if !socket_path.contains(':') {
+            if let Ok(meta) = std::fs::metadata(&socket_path) {
+                use std::os::unix::fs::FileTypeExt;
+                if !meta.file_type().is_socket() {
+                    let ev = make_event(SelfProtectKind::SocketTampered,
+                        format!("IPC socket at '{}' has been replaced with a non-socket file. An attacker may have replaced the socket to intercept security engine communications.", socket_path),
+                        format!("path={}", socket_path));
+                    let _ = tx.send(ev).await;
+                }
             }
         }
     }

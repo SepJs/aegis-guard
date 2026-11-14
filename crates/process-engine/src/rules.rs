@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::fs;
 use crate::models::{AnomalyDetail, Confidence, ProcInfo};
 
 const BROWSER_NAMES: &[&str] = &[
@@ -13,13 +12,6 @@ const SHELL_NAMES: &[&str] = &[
     "bash","bash.exe","sh","sh.exe","dash","dash.exe","zsh","fish","ksh","tcsh","csh","ash","mksh","posh",
     "cmd","cmd.exe","powershell","powershell.exe","pwsh","pwsh.exe",
     "wscript","wscript.exe","cscript","cscript.exe","mshta","mshta.exe"
-];
-const NETWORK_TOOLS: &[&str] = &[
-    "curl","curl.exe","wget","wget.exe","nc","nc.exe","ncat","ncat.exe","netcat","nmap","nmap.exe",
-    "ssh","ssh.exe","scp","scp.exe","sftp","ftp","ftp.exe","telnet","telnet.exe",
-    "certutil","certutil.exe","bitsadmin","bitsadmin.exe",
-    "python3","python3.exe","python","python.exe","perl","perl.exe","ruby","ruby.exe","node","node.exe","nodejs","php","lua",
-    "socat","socat.exe","dig","host","nslookup","whois","tftp","tftp.exe"
 ];
 
 const LOLBINS: &[&str] = &[
@@ -46,7 +38,7 @@ const INTERPRETER_NAMES: &[&str] = &[
 #[derive(Clone)]
 pub struct RuleEngine {
     browsers: HashSet<&'static str>, shells: HashSet<&'static str>,
-    net_tools: HashSet<&'static str>, office: HashSet<&'static str>, interpreters: HashSet<&'static str>,
+    office: HashSet<&'static str>, interpreters: HashSet<&'static str>,
     lolbins: HashSet<&'static str>,
 }
 
@@ -55,7 +47,6 @@ impl RuleEngine {
         Self {
             browsers: BROWSER_NAMES.iter().copied().collect(),
             shells: SHELL_NAMES.iter().copied().collect(),
-            net_tools: NETWORK_TOOLS.iter().copied().collect(),
             office: OFFICE_NAMES.iter().copied().collect(),
             interpreters: INTERPRETER_NAMES.iter().copied().collect(),
             lolbins: LOLBINS.iter().copied().collect(),
@@ -144,7 +135,7 @@ impl RuleEngine {
 
     fn par_006(&self, child: &ProcInfo, child_name: &str, ancestors: &[u32]) -> Option<AnomalyDetail> {
         if !self.shells.contains(child_name) || child.ppid != 1 { return None; }
-        let tty = fs::read_link(format!("/proc/{}/fd/0", child.pid)).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+        let tty = std::fs::read_link(format!("/proc/{}/fd/0", child.pid)).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
         if tty.starts_with("/dev/pts") || tty.starts_with("/dev/tty") { return None; }
         // Container entrypoints /pid1 shells often lack PTY fd0
         if child.pid <= 20 { return None; }
@@ -279,5 +270,3 @@ impl RuleEngine {
 }
 
 impl Default for RuleEngine { fn default() -> Self { Self::new() } }
-
-fn proc_pid_exists(pid: u32) -> bool { std::path::Path::new(&format!("/proc/{}", pid)).exists() }

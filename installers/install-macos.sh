@@ -119,20 +119,26 @@ echo -e "  ${GREEN}✓${RESET} frontend built"
 echo -e "${CYAN}[4/5] Building native Go & Rust components...${RESET}"
 if [ "$HAVE_GO" -eq 1 ] && [ -d "network-observer" ]; then
     mkdir -p target
-    (cd network-observer && go build -o ../target/aegis-network-observer ./cmd/observer)
+    (cd network-observer && go build -ldflags="-s -w" -o ../target/aegis-network-observer ./cmd/observer)
     echo -e "  ${GREEN}✓${RESET} Go network-observer built"
 fi
 
 APP_BUNDLE_DST="/Applications/Aegis-Guard.app"
 if [ "$HAVE_CARGO" -eq 1 ] && [ "$MODE" = "desktop" ]; then
+    cargo build --release -p process-engine || true
+    cargo build --release -p aegis-guard || true
+    if command -v pkg-config &>/dev/null && pkg-config --exists gtk+-3.0 2>/dev/null; then
+        cargo build --release -p aegis-installer || true
+    fi
     if ! command -v cargo-tauri &>/dev/null; then
         cargo install tauri-cli --version "^2.0" --locked || true
     fi
     (cd tauri-app && cargo tauri build --bundles app) || true
-    BUILT_APP="$(find target -maxdepth 5 -name "Aegis-Guard.app" -type d 2>/dev/null | head -n 1 || true)"
+    BUILT_APP="$(find target tauri-app/src-tauri/target -maxdepth 6 -name "Aegis-Guard.app" -type d 2>/dev/null | head -n 1 || true)"
     if [ -n "$BUILT_APP" ]; then
         rm -rf "$APP_BUNDLE_DST"
         cp -R "$BUILT_APP" "$APP_BUNDLE_DST"
+        xattr -cr "$APP_BUNDLE_DST" 2>/dev/null || true
         echo -e "  ${GREEN}✓${RESET} Installed macOS App: $APP_BUNDLE_DST"
     fi
 fi
@@ -148,10 +154,29 @@ cd "$PROJECT_ROOT"
 exec bash "$PROJECT_ROOT/aegis.sh" "\$@"
 CLI_EOF
 chmod 755 "${BIN_TARGET}/aegis-guard"
+
+cat > "${BIN_TARGET}/aegis-guard-desktop" << DESK_EOF
+#!/usr/bin/env bash
+if [ -d "$APP_BUNDLE_DST" ]; then
+    open "$APP_BUNDLE_DST"
+else
+    cd "$PROJECT_ROOT"
+    exec bash "$PROJECT_ROOT/aegis.sh" --desktop "\$@"
+fi
+DESK_EOF
+chmod 755 "${BIN_TARGET}/aegis-guard-desktop"
+
 [ -f target/aegis-network-observer ] && install -m 755 target/aegis-network-observer "${BIN_TARGET}/"
+[ -f target/release/aegis-process-engine ] && install -m 755 target/release/aegis-process-engine "${BIN_TARGET}/"
+[ -f target/release/Aegis-Guard ] && install -m 755 target/release/Aegis-Guard "${BIN_TARGET}/aegis-guard-bin"
+[ -f target/release/aegis-installer ] && install -m 755 target/release/aegis-installer "${BIN_TARGET}/"
 
 echo ""
 echo -e "${GREEN}${BOLD}━━━ Aegis-Guard v1.2.0 macOS Setup Complete ━━━${RESET}"
 echo -e "  Console mode: ${CYAN}aegis-guard --console${RESET}  (http://127.0.0.1:3000)"
-[ -d "$APP_BUNDLE_DST" ] && echo -e "  Desktop App:  ${CYAN}open /Applications/Aegis-Guard.app${RESET}"
+if [ -d "$APP_BUNDLE_DST" ]; then
+    echo -e "  Desktop App:  ${CYAN}open /Applications/Aegis-Guard.app${RESET}"
+else
+    echo -e "  Desktop UI:   ${CYAN}aegis-guard-desktop${RESET}"
+fi
 echo ""

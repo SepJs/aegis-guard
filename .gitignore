@@ -1,0 +1,36 @@
+# Dependencies & package caches
+node_modules/
+tauri-app/node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
+target/
+tauri-app/src-tauri/target/
+dist/
+tauri-app/dist/
+release-assets/
+dist-artifacts/
+pkg-win-gtk/
+*.AppImage
+*.deb
+*.rpm
+*.dmg
+*.msi
+*.exe
+
+# Local runtime state & databases
+*.db
+*.db-wal
+*.db-shm
+*.log
+*.sock
+
+# Browser automation / temp test artifacts
+.playwright-cli/
+
+# Environment & OS metadata
+.env
+.env.local
+.DS_Store
+Thumbs.db

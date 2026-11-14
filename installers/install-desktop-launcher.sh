@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# install-desktop-launcher.sh — adds a double-clickable "Aegis-Guard" launcher
-# to your applications menu. By Vladimir Unknown.
+# install-desktop-launcher.sh — installs a double-clickable "Aegis-Guard" launcher
+# to the current user's desktop and applications menu.
 
-set -e
+set -euo pipefail
 cd "$(dirname "$0")/.."
 PROJECT_DIR="$(pwd)"
 DESKTOP_DIR="$HOME/.local/share/applications"
@@ -15,8 +15,8 @@ cat > "$DESKTOP_DIR/aegis-guard.desktop" << DESK
 [Desktop Entry]
 Type=Application
 Name=Aegis-Guard
-Comment=Endpoint Security Suite — by Vladimir Unknown
-Exec=bash -c 'cd "$PROJECT_DIR" && x-terminal-emulator -e bash aegis.sh || xterm -e bash aegis.sh'
+Comment=Endpoint Security & Network IDS Suite
+Exec=bash -c 'export WEBKIT_DISABLE_DMABUF_RENDERER="\${WEBKIT_DISABLE_DMABUF_RENDERER:-1}"; cd "$PROJECT_DIR" && exec bash "$PROJECT_DIR/aegis.sh" --desktop'
 Icon=$ICON_DIR/aegis-guard.png
 Terminal=false
 Categories=System;Security;

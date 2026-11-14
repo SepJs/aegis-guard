@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Aegis-Guard — system setup (systemd services). By Vladimir Unknown.
-# For a quick one-shot run without systemd, use ../aegis.sh instead.
+# Aegis-Guard — systemd service setup.
+# For a one-shot run without systemd, use ../aegis.sh instead.
 
 set -euo pipefail
 
@@ -42,7 +42,7 @@ fi
 info "Installing systemd service: aegis-process-engine..."
 cat > "$SYSTEMD_DIR/aegis-process-engine.service" << 'UNIT'
 [Unit]
-Description=Aegis-Guard Process Engine — by Vladimir Unknown
+Description=Aegis-Guard Process Engine
 After=network.target
 Wants=network.target
 
@@ -67,7 +67,7 @@ UNIT
 info "Installing systemd service: aegis-network-observer..."
 cat > "$SYSTEMD_DIR/aegis-network-observer.service" << 'UNIT'
 [Unit]
-Description=Aegis-Guard Network Observer — by Vladimir Unknown
+Description=Aegis-Guard Network Observer
 After=network.target aegis-process-engine.service
 Wants=aegis-process-engine.service
 

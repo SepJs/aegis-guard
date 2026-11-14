@@ -85,7 +85,7 @@ impl Journal {
             let ts_ms: i64 = row.get(4)?;
             Ok(DebugEntry {
                 id: row.get(0)?, rule: row.get(1)?, pid: row.get::<_, u32>(2)?, process: row.get(3)?,
-                ts: Utc.timestamp_millis_opt(ts_ms).unwrap(), note: row.get(5)?,
+                ts: Utc.timestamp_millis_opt(ts_ms).single().unwrap_or_else(Utc::now), note: row.get(5)?,
                 suppression_reason: None, original_score: None, adjusted_score: None, category: None,
             })
         })?;
@@ -106,6 +106,6 @@ fn row_to_incident(row: &rusqlite::Row<'_>) -> rusqlite::Result<ThreatIncident> 
         cmdline: serde_json::from_str(&cmdline_json).unwrap_or_default(), exe_path: row.get(7)?,
         rule: row.get(8)?, confidence: row.get(9)?, reason: row.get(10)?,
         ancestors: serde_json::from_str(&ancestors_json).unwrap_or_default(),
-        ts: Utc.timestamp_millis_opt(ts_ms).unwrap(), resolved: resolved != 0, digest: row.get(14)?,
+        ts: Utc.timestamp_millis_opt(ts_ms).single().unwrap_or_else(Utc::now), resolved: resolved != 0, digest: row.get(14)?,
     })
 }

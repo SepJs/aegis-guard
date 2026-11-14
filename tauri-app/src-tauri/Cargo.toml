@@ -3,8 +3,8 @@ name        = "aegis-guard"
 version     = "1.2.0"
 edition     = "2021"
 description = "Aegis-Guard desktop suite — Tauri shell + security engines"
-authors     = ["Vladimir Unknown"]
-license     = "Proprietary"
+authors     = ["Aegis-Guard Contributors"]
+license     = "MIT OR Apache-2.0"
 
 [lib]
 name = "aegis_tauri_lib"

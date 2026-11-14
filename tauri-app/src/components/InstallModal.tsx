@@ -21,20 +21,30 @@ export default function InstallModal({ onClose }: { onClose: () => void }) {
     }
   }, []);
 
-  const commands: Record<TargetPlatform, { remote: string; local: string; file: string }> = {
+  const commands: Record<
+    TargetPlatform,
+    { remote: string; guiLocal: string; consoleLocal: string; file: string }
+  > = {
     linux: {
-      remote: "curl -sSL https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/install-linux.sh | sudo bash -s -- --yes",
-      local: "bash installers/install-linux.sh --console   # or: bash aegis.sh --console",
+      remote:
+        "curl -fsSL https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/install-linux.sh | sudo bash -s -- --yes",
+      guiLocal: "bash install-gui.sh   # Opens native GTK3 GUI installer",
+      consoleLocal: "bash installers/install-linux.sh --console --yes",
       file: "install-linux.sh",
     },
     macos: {
-      remote: "curl -sSL https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/install-macos.sh | bash -s -- --yes",
-      local: "bash installers/install-macos.sh --console   # or: bash aegis.sh --console",
+      remote:
+        "curl -fsSL https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/install-macos.sh | bash -s -- --yes",
+      guiLocal: "bash install-gui.sh   # Builds & opens GTK+3 GUI installer",
+      consoleLocal: "bash installers/install-macos.sh --console --yes",
       file: "install-macos.sh",
     },
     windows: {
-      remote: 'powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/install-windows.ps1 | iex"',
-      local: ".\\installers\\install-windows.ps1 -ConsoleOnly",
+      remote:
+        'powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/install-windows.ps1 | iex"',
+      guiLocal:
+        "aegis-installer.exe   # Or run install-windows.bat as Administrator",
+      consoleLocal: ".\\installers\\install-windows.ps1 -ConsoleOnly",
       file: "install-windows.bat",
     },
   };
@@ -46,7 +56,7 @@ export default function InstallModal({ onClose }: { onClose: () => void }) {
   };
 
   const downloadInstallerScript = (os: TargetPlatform) => {
-    let filename = commands[os].file;
+    const filename = commands[os].file;
     let content = "";
     if (os === "windows") {
       content = [
@@ -54,7 +64,7 @@ export default function InstallModal({ onClose }: { onClose: () => void }) {
         "title Aegis-Guard Windows Installer (v1.2.0)",
         "net session >nul 2>&1",
         "if %errorLevel% neq 0 (",
-        "  powershell -NoProfile -Command \"Start-Process '%~f0' -Verb RunAs\"",
+        '  powershell -NoProfile -Command "Start-Process \'%~f0\' -Verb RunAs"',
         "  exit /b",
         ")",
         'powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/install-windows.ps1 | iex"',
@@ -65,7 +75,7 @@ export default function InstallModal({ onClose }: { onClose: () => void }) {
       content = [
         "#!/usr/bin/env bash",
         "set -euo pipefail",
-        'curl -sSL https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/install-macos.sh | bash -s -- --yes',
+        "curl -fsSL https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/install-macos.sh | bash -s -- --yes",
         "",
       ].join("\n");
     } else {
@@ -73,7 +83,7 @@ export default function InstallModal({ onClose }: { onClose: () => void }) {
         "#!/usr/bin/env bash",
         "set -euo pipefail",
         'if [ "$EUID" -ne 0 ]; then exec sudo bash "$0" "$@"; fi',
-        'curl -sSL https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/install-linux.sh | bash -s -- --yes',
+        "curl -fsSL https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/install-linux.sh | bash -s -- --yes",
         "",
       ].join("\n");
     }
@@ -100,7 +110,7 @@ export default function InstallModal({ onClose }: { onClose: () => void }) {
       <div
         id="install-modal-box"
         style={{
-          width: "min(680px, 94vw)",
+          width: "min(690px, 94vw)",
           background: "var(--bg1)",
           border: "1px solid var(--border2)",
           borderRadius: 8,
@@ -113,18 +123,23 @@ export default function InstallModal({ onClose }: { onClose: () => void }) {
         <div className="modal-header">
           <div>
             <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "var(--tx0)" }}>
-              Cross-Platform Console &amp; Desktop Installer
+              Cross-Platform GTK3 GUI &amp; Console Installer
             </h2>
             <p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--tx2)" }}>
-              Automated setup for Linux, macOS, and Windows (v1.2.0)
+              Graphical setup wizard (GTK3) and automated CLI scripts for Linux, macOS &amp; Windows (v1.2.0)
             </p>
           </div>
-          <button type="button" className="modal-close" onClick={onClose} aria-label="Close installer modal">
+          <button
+            type="button"
+            className="modal-close"
+            onClick={onClose}
+            aria-label="Close installer modal"
+          >
             ✕
           </button>
         </div>
 
-        <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
           <div
             style={{
               padding: "12px 14px",
@@ -139,7 +154,14 @@ export default function InstallModal({ onClose }: { onClose: () => void }) {
             }}
           >
             <div>
-              <div style={{ fontSize: 10, color: "var(--teall)", fontWeight: 700, textTransform: "uppercase" }}>
+              <div
+                style={{
+                  fontSize: 10,
+                  color: "var(--teall)",
+                  fontWeight: 700,
+                  textTransform: "uppercase",
+                }}
+              >
                 Detected Platform
               </div>
               <div style={{ fontSize: 13, fontWeight: 600, color: "var(--tx0)", marginTop: 2 }}>
@@ -168,15 +190,15 @@ export default function InstallModal({ onClose }: { onClose: () => void }) {
               border: "1px solid var(--border)",
               display: "flex",
               flexDirection: "column",
-              gap: 12,
+              gap: 10,
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span style={{ fontSize: 13, fontWeight: 600, color: "var(--tx0)" }}>
-                Remote Console Install ({platform === "macos" ? "macOS" : platform.toUpperCase()})
+                GTK3 Graphical Installer Wizard (Recommended)
               </span>
               <span className="mono" style={{ fontSize: 10, color: "var(--teall)" }}>
-                {current.file}
+                aegis-installer
               </span>
             </div>
 
@@ -191,16 +213,62 @@ export default function InstallModal({ onClose }: { onClose: () => void }) {
                 gap: 8,
               }}
             >
-              <code style={{ flex: 1, fontSize: 11, color: "var(--teall)", overflowX: "auto", whiteSpace: "nowrap" }}>
+              <code
+                style={{
+                  flex: 1,
+                  fontSize: 11,
+                  color: "var(--teall)",
+                  overflowX: "auto",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {current.guiLocal}
+              </code>
+              <button
+                type="button"
+                className="sm-btn"
+                onClick={() => handleCopy(current.guiLocal, "guiLocal")}
+              >
+                {copiedKey === "guiLocal" ? "Copied" : "Copy"}
+              </button>
+            </div>
+
+            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--tx2)", marginTop: 4 }}>
+              One-line Remote Install ({platform === "macos" ? "macOS" : platform.toUpperCase()}):
+            </div>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                background: "var(--bg1)",
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                padding: "8px 12px",
+                gap: 8,
+              }}
+            >
+              <code
+                style={{
+                  flex: 1,
+                  fontSize: 11,
+                  color: "var(--vl)",
+                  overflowX: "auto",
+                  whiteSpace: "nowrap",
+                }}
+              >
                 {current.remote}
               </code>
-              <button type="button" className="sm-btn" onClick={() => handleCopy(current.remote, "remote")}>
+              <button
+                type="button"
+                className="sm-btn"
+                onClick={() => handleCopy(current.remote, "remote")}
+              >
                 {copiedKey === "remote" ? "Copied" : "Copy"}
               </button>
             </div>
 
             <div style={{ fontSize: 11, fontWeight: 600, color: "var(--tx2)", marginTop: 2 }}>
-              Or run headless console mode from a cloned repository:
+              Headless Console Setup (from cloned repository):
             </div>
             <div
               style={{
@@ -213,11 +281,23 @@ export default function InstallModal({ onClose }: { onClose: () => void }) {
                 gap: 8,
               }}
             >
-              <code style={{ flex: 1, fontSize: 11, color: "var(--vl)", overflowX: "auto", whiteSpace: "nowrap" }}>
-                {current.local}
+              <code
+                style={{
+                  flex: 1,
+                  fontSize: 11,
+                  color: "var(--tx1)",
+                  overflowX: "auto",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {current.consoleLocal}
               </code>
-              <button type="button" className="sm-btn" onClick={() => handleCopy(current.local, "local")}>
-                {copiedKey === "local" ? "Copied" : "Copy"}
+              <button
+                type="button"
+                className="sm-btn"
+                onClick={() => handleCopy(current.consoleLocal, "consoleLocal")}
+              >
+                {copiedKey === "consoleLocal" ? "Copied" : "Copy"}
               </button>
             </div>
 
@@ -243,7 +323,7 @@ export default function InstallModal({ onClose }: { onClose: () => void }) {
           }}
         >
           <span style={{ fontSize: 11, color: "var(--tx2)" }}>
-            Supports headless server console (port 3000) and native desktop packaging
+            Includes GTK3 visual wizard, native desktop runtime, and console server (port 3000)
           </span>
           <button type="button" className="sm-btn" onClick={onClose}>
             Close

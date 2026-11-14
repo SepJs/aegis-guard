@@ -1,23 +1,27 @@
+import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+
 /**
  * Aegis-Guard IPC Core
- * Routes all commands directly to native Tauri IPC runtime or the live Linux kernel Express backend (/api/ipc).
+ * Routes all commands directly to native Tauri IPC runtime or the live kernel Express backend (/api/ipc).
  */
 
 export function isTauriRuntime(): boolean {
   return (
     typeof window !== "undefined" &&
-    Boolean((window as any).__TAURI_INTERNALS__) &&
-    Boolean((window as any).__TAURI__?.core?.invoke)
+    Boolean((window as any).__TAURI_INTERNALS__ || (window as any).__TAURI__?.core?.invoke)
   );
 }
 
 export async function invoke<T = any>(cmd: string, args: Record<string, any> = {}): Promise<T> {
   // 1. Check if running inside native Tauri desktop runtime
   if (isTauriRuntime()) {
-    return (await (window as any).__TAURI__.core.invoke(cmd, args)) as T;
+    if ((window as any).__TAURI__?.core?.invoke) {
+      return (await (window as any).__TAURI__.core.invoke(cmd, args)) as T;
+    }
+    return await tauriInvoke<T>(cmd, args);
   }
 
-  // 2. Query live Linux kernel backend (/api/ipc)
+  // 2. Query live kernel Express backend (/api/ipc)
   const resp = await fetch("/api/ipc", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

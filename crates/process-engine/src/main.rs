@@ -21,8 +21,8 @@ async fn main() -> Result<()> {
 
     let socket_path = std::env::var("AEGIS_SOCKET").unwrap_or_else(|_| DEFAULT_SOCKET_PATH.to_string());
 
-    info!("Aegis-Guard Process Engine — by Vladimir Unknown");
-    info!("rules: PAR-001..008 + PATH-001..004 + ARG-001..003 + ENV-001..002");
+    info!("Aegis-Guard Process Engine v1.2.0 starting");
+    info!("rules: PAR-001..014 + PATH-001..004 + ARG-001..003 + ENV-001..002");
     info!(socket = %socket_path, "IPC target");
 
     let rules = RuleEngine::new();

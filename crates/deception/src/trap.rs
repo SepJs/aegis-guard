@@ -176,7 +176,11 @@ fn trap_base_dir() -> PathBuf {
                 return p;
             }
         }
-        PathBuf::from("/var/lib/aegis/traps")
+        let sys = PathBuf::from("/var/lib/aegis/traps");
+        if std::fs::create_dir_all(&sys).is_ok() {
+            return sys;
+        }
+        std::env::temp_dir().join("aegis-guard-traps")
     }
 }
 

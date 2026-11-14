@@ -24,14 +24,33 @@ const ENGINE_VERSION = "4.6.0-LINUX";
 
 const app = express();
 const server = http.createServer(app);
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json({ limit: "25mb" }));
 
 // -------------------------------------------------------------
 // Live System Directories & Persistent Storage Paths
 // -------------------------------------------------------------
-const DATA_DIR = "/tmp/aegis_guard_data";
+function resolveDataDir(): string {
+  const candidates = [
+    process.env.AEGIS_DATA_DIR,
+    process.platform === "win32"
+      ? path.join(process.env.LOCALAPPDATA || os.tmpdir(), "Aegis-Guard", "data")
+      : path.join(os.tmpdir(), "aegis_guard_data"),
+    path.join(os.homedir(), ".local", "share", "aegis-guard"),
+  ].filter(Boolean) as string[];
+
+  for (const candidate of candidates) {
+    try {
+      if (!fs.existsSync(candidate)) fs.mkdirSync(candidate, { recursive: true });
+      fs.accessSync(candidate, fs.constants.W_OK);
+      return candidate;
+    } catch {}
+  }
+  return path.join(os.tmpdir(), `aegis_guard_${process.getuid ? process.getuid() : process.pid}`);
+}
+
+const DATA_DIR = resolveDataDir();
 const QUARANTINE_DIR = path.join(DATA_DIR, "quarantine");
 const SANDBOX_DIR = path.join(DATA_DIR, "sandbox");
 const LEGACY_SAMPLES_DIR = path.join(DATA_DIR, "samples");
@@ -3158,7 +3177,12 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.resolve(process.cwd(), "tauri-app/dist");
+    const tauriDist = path.resolve(process.cwd(), "tauri-app/dist");
+    const rootDist = path.resolve(process.cwd(), "dist");
+    const distPath = fs.existsSync(path.join(tauriDist, "index.html")) ? tauriDist : rootDist;
+    if (!fs.existsSync(path.join(distPath, "index.html"))) {
+      console.error(`[Aegis-Guard] Frontend build not found at ${tauriDist} or ${rootDist}. Run 'npm run build' first.`);
+    }
     app.use(express.static(distPath));
     app.use((_req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
@@ -3166,7 +3190,7 @@ async function startServer() {
   }
 
   server.listen(PORT, "0.0.0.0", () => {
-    console.log(`[Aegis-Guard] Live Linux Endpoint Security & IDS Suite active on http://0.0.0.0:${PORT}`);
+    console.log(`[Aegis-Guard] Live Endpoint Security & IDS Suite active on http://127.0.0.1:${PORT}`);
   });
 }
 

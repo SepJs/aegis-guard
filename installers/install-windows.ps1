@@ -28,7 +28,10 @@ $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIden
 if (-not $isAdmin) {
     Write-Host "[!] Administrative privileges required. Relaunching with UAC elevation..." -ForegroundColor Yellow
     if ($PSCommandPath) {
-        Start-Process powershell.exe -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
+        $argStr = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
+        if ($ConsoleOnly) { $argStr += " -ConsoleOnly" }
+        if ($NoLaunch) { $argStr += " -NoLaunch" }
+        Start-Process powershell.exe -Verb RunAs -ArgumentList $argStr
     } else {
         Start-Process powershell.exe -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"irm https://raw.githubusercontent.com/SepJs/aegis-guard/main/installers/install-windows.ps1 | iex`""
     }
@@ -37,7 +40,7 @@ if (-not $isAdmin) {
 
 Write-Host "[+] Elevated Administrator privileges confirmed." -ForegroundColor Green
 
-# 2. Directory Provisioning
+# 2. Directory Provisioning + Standard User Write Permissions
 $InstallRoot   = "$env:ProgramFiles\Aegis-Guard"
 $DataRoot      = "$env:ProgramData\Aegis-Guard"
 $QuarantineDir = "$DataRoot\quarantine"
@@ -50,6 +53,10 @@ foreach ($dir in @($InstallRoot, $DataRoot, $QuarantineDir, $SandboxDir, $LogDir
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
     }
 }
+try {
+    icacls $DataRoot /grant "Users:(OI)(CI)M" /T /Q | Out-Null
+    icacls $InstallRoot /grant "Users:(OI)(CI)M" /T /Q | Out-Null
+} catch {}
 Write-Host "[+] Provisioned runtime vault: $DataRoot" -ForegroundColor Green
 
 # 3. Locate or Clone Source Root
@@ -69,6 +76,7 @@ if ($SourceRoot -and (Test-Path "$SourceRoot\..\package.json")) {
     }
     $SourceRoot = $repoDir
 }
+try { icacls $SourceRoot /grant "Users:(OI)(CI)M" /T /Q | Out-Null } catch {}
 Write-Host "[+] Working source directory: $SourceRoot" -ForegroundColor Green
 
 # 4. Verify Toolchains
@@ -100,7 +108,7 @@ if ($hasGo -and (Test-Path "$SourceRoot\network-observer")) {
     Push-Location "$SourceRoot\network-observer"
     try {
         $env:CGO_ENABLED = "0"
-        go build -o "$InstallRoot\aegis-network-observer.exe" ./cmd/observer
+        go build -ldflags="-s -w" -o "$InstallRoot\aegis-network-observer.exe" ./cmd/observer
         if (Test-Path "$InstallRoot\aegis-network-observer.exe") {
             Write-Host "[+] Installed: $InstallRoot\aegis-network-observer.exe" -ForegroundColor Green
         }
@@ -112,7 +120,7 @@ if ($hasGo -and (Test-Path "$SourceRoot\network-observer")) {
     Write-Host "[*] Go compiler not found; skipping native Go observer build." -ForegroundColor Yellow
 }
 
-# 7. Build Native Rust Binaries (Correct Crate/Binary Names)
+# 7. Build Native Rust Binaries (Desktop + Process Engine + Optional GTK Installer)
 Write-Host "`n[*] Step 3/4: Building Native Rust Engines (Optional if Rust installed)..." -ForegroundColor Cyan
 if (-not $ConsoleOnly -and $hasCargo) {
     Push-Location $SourceRoot
@@ -126,6 +134,16 @@ if (-not $ConsoleOnly -and $hasCargo) {
         if (Test-Path "$SourceRoot\target\release\Aegis-Guard.exe") {
             Copy-Item "$SourceRoot\target\release\Aegis-Guard.exe" "$InstallRoot\Aegis-Guard.exe" -Force
             Write-Host "[+] Installed: $InstallRoot\Aegis-Guard.exe" -ForegroundColor Green
+        }
+        if ((Get-Command pkg-config -ErrorAction SilentlyContinue)) {
+            cmd /c "pkg-config --exists gtk+-3.0 2>nul"
+            if ($LASTEXITCODE -eq 0) {
+                cargo build --release -p aegis-installer
+                if (Test-Path "$SourceRoot\target\release\aegis-installer.exe") {
+                    Copy-Item "$SourceRoot\target\release\aegis-installer.exe" "$InstallRoot\aegis-installer.exe" -Force
+                    Write-Host "[+] Installed GTK GUI Installer: $InstallRoot\aegis-installer.exe" -ForegroundColor Green
+                }
+            }
         }
     } catch {
         Write-Host "[!] Rust desktop build skipped: $_" -ForegroundColor Yellow
@@ -141,11 +159,13 @@ $ConsoleCmd = "$InstallRoot\aegis-guard.cmd"
 $consoleScript = @"
 @echo off
 cd /d "$SourceRoot"
+set "AEGIS_DATA_DIR=$DataRoot"
 if exist "$InstallRoot\aegis-network-observer.exe" (
     start "Aegis-Network-Observer" /min "$InstallRoot\aegis-network-observer.exe"
 )
 echo [*] Starting Aegis-Guard Console & Web UI on http://127.0.0.1:3000 ...
 set NODE_ENV=production
+start "" /B powershell -NoProfile -Command "for(`$i=0;`$i -lt 30;`$i++){try{`$c=New-Object Net.Sockets.TcpClient('127.0.0.1',3000);`$c.Close();Start-Process 'http://127.0.0.1:3000';break}catch{Start-Sleep -Milliseconds 400}}"
 call npm start
 "@
 Set-Content -Path $ConsoleCmd -Value $consoleScript -Encoding ASCII
@@ -155,6 +175,7 @@ $desktopScript = @"
 @echo off
 set "AEGIS_SOCKET=127.0.0.1:50054"
 set "AEGIS_NET=1"
+set "AEGIS_DATA_DIR=$DataRoot"
 if exist "%~dp0aegis-process-engine.exe" start "Aegis-Process-Engine" /min "%~dp0aegis-process-engine.exe"
 if exist "%~dp0aegis-network-observer.exe" start "Aegis-Network-Observer" /min "%~dp0aegis-network-observer.exe"
 if exist "%~dp0Aegis-Guard.exe" (
@@ -172,7 +193,7 @@ if ($machinePath -notlike "*$InstallRoot*") {
     Write-Host "[+] Added $InstallRoot to System PATH (available as 'aegis-guard' in new terminals)." -ForegroundColor Green
 }
 
-# Firewall rules for localhost Go & Rust IPC bridges
+# Firewall rules for localhost Go & Rust IPC bridges + Console port
 try {
     netsh advfirewall firewall delete rule name="Aegis-Guard IPC Process Engine" 2>$null | Out-Null
     netsh advfirewall firewall add rule name="Aegis-Guard IPC Process Engine" dir=in action=allow protocol=TCP localport=50054 remoteip=127.0.0.1 | Out-Null
@@ -180,7 +201,13 @@ try {
     netsh advfirewall firewall add rule name="Aegis-Guard IPC Network Observer" dir=in action=allow protocol=TCP localport=50053 remoteip=127.0.0.1 | Out-Null
 } catch {}
 
-# Create Start Menu & Desktop Shortcuts
+# Create Start Menu & Desktop Shortcuts with icon
+$IconSrc = "$SourceRoot\tauri-app\src-tauri\icons\icon.ico"
+$IconDst = "$InstallRoot\aegis-guard.ico"
+if (Test-Path $IconSrc) {
+    Copy-Item $IconSrc $IconDst -Force
+}
+
 try {
     $WshShell = New-Object -ComObject WScript.Shell
     $DesktopPath = [Environment]::GetFolderPath("Desktop")
@@ -188,6 +215,7 @@ try {
     $Shortcut.TargetPath = $LauncherCmd
     $Shortcut.WorkingDirectory = $InstallRoot
     $Shortcut.Description = "Aegis-Guard Endpoint Security & IDS Suite"
+    if (Test-Path $IconDst) { $Shortcut.IconLocation = $IconDst }
     $Shortcut.Save()
 
     $StartMenuPath = "$env:ProgramData\Microsoft\Windows\Start Menu\Programs"
@@ -195,6 +223,7 @@ try {
     $SmShortcut.TargetPath = $LauncherCmd
     $SmShortcut.WorkingDirectory = $InstallRoot
     $SmShortcut.Description = "Aegis-Guard Endpoint Security & IDS Suite"
+    if (Test-Path $IconDst) { $SmShortcut.IconLocation = $IconDst }
     $SmShortcut.Save()
     Write-Host "[+] Desktop & Start Menu shortcuts installed." -ForegroundColor Green
 } catch {}

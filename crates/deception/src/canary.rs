@@ -22,7 +22,11 @@ fn get_canary_dir() -> PathBuf {
                 return p;
             }
         }
-        PathBuf::from("/var/lib/aegis/canaries")
+        let sys = PathBuf::from("/var/lib/aegis/canaries");
+        if std::fs::create_dir_all(&sys).is_ok() {
+            return sys;
+        }
+        std::env::temp_dir().join("aegis-guard-canaries")
     }
 }
 
@@ -79,7 +83,7 @@ impl CanaryManager {
         let tokens = self.tokens.read().unwrap();
         for (token, canary) in tokens.iter() {
             if payload.contains(token.as_str()) {
-                warn!(token = &token[..12], file = %canary.file_path, "CANARY TOKEN DETECTED IN NETWORK PAYLOAD");
+                warn!(token = &token[..12.min(token.len())], file = %canary.file_path, "CANARY TOKEN DETECTED IN NETWORK PAYLOAD");
                 return Some(canary.clone());
             }
         }
@@ -112,4 +116,11 @@ impl CanaryManager {
     }
 }
 
-impl Default for CanaryManager { fn default() -> Self { Self::new().expect("canary manager init") } }
+impl Default for CanaryManager {
+    fn default() -> Self {
+        Self::new().unwrap_or_else(|_| Self {
+            tokens: RwLock::new(HashMap::new()),
+            store: std::env::temp_dir().join("aegis-guard-canaries").join("tokens.json"),
+        })
+    }
+}

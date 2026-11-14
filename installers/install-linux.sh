@@ -44,6 +44,13 @@ if [ "$EUID" -ne 0 ]; then
     fi
 fi
 
+# Resolve non-root desktop user home even when invoked with sudo
+REAL_USER="${SUDO_USER:-$USER}"
+REAL_HOME="$HOME"
+if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+    REAL_HOME="$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6 || echo "/home/$SUDO_USER")"
+fi
+
 # Locate repo root or clone cleanly when invoked via `curl | bash`
 SCRIPT_DIR=""
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
@@ -73,7 +80,6 @@ cd "$PROJECT_ROOT"
 ARCH="$(uname -m)"
 echo -e "${CYAN}Target Root:${RESET} ${BOLD}${PROJECT_ROOT}${RESET} (${ARCH})"
 
-# Decide desktop vs console mode automatically if "auto"
 if [ "$MODE" = "auto" ]; then
     if [ -n "${DISPLAY:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
         MODE="desktop"
@@ -119,7 +125,7 @@ case "$family" in
         $SUDO apt-get update -qq
         if [ "$MODE" = "desktop" ]; then
             $SUDO apt-get install -y -qq build-essential curl git pkg-config \
-                libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+                libwebkit2gtk-4.1-dev libgtk-3-dev libglib2.0-dev libayatana-appindicator3-dev \
                 librsvg2-dev libssl-dev patchelf || true
         else
             $SUDO apt-get install -y -qq build-essential curl git pkg-config libssl-dev || true
@@ -128,7 +134,7 @@ case "$family" in
     fedora)
         if [ "$MODE" = "desktop" ]; then
             $SUDO dnf install -y gcc gcc-c++ make curl git pkgconf-pkg-config \
-                webkit2gtk4.1-devel gtk3-devel libappindicator-gtk3-devel librsvg2-devel openssl-devel || true
+                webkit2gtk4.1-devel gtk3-devel glib2-devel libappindicator-gtk3-devel librsvg2-devel openssl-devel || true
         else
             $SUDO dnf install -y gcc gcc-c++ make curl git pkgconf-pkg-config openssl-devel || true
         fi
@@ -142,7 +148,11 @@ case "$family" in
         fi
         ;;
     suse)
-        $SUDO zypper install -y curl git pkg-config gcc gcc-c++ make openssl-devel || true
+        if [ "$MODE" = "desktop" ]; then
+            $SUDO zypper install -y curl git pkg-config gcc gcc-c++ make gtk3-devel webkit2gtk3-soup2-devel openssl-devel || true
+        else
+            $SUDO zypper install -y curl git pkg-config gcc gcc-c++ make openssl-devel || true
+        fi
         ;;
     alpine)
         $SUDO apk add --no-cache build-base curl git pkgconf openssl-dev || true
@@ -160,6 +170,7 @@ if ! command -v node &>/dev/null; then
 fi
 echo -e "  ${GREEN}✓${RESET} Node: $(node --version)"
 
+[ -f "$REAL_HOME/.cargo/env" ] && source "$REAL_HOME/.cargo/env" || true
 [ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env" || true
 HAVE_CARGO=0
 if command -v cargo &>/dev/null; then
@@ -168,7 +179,7 @@ if command -v cargo &>/dev/null; then
 elif [ "$MODE" = "desktop" ]; then
     echo -e "  ${YELLOW}Installing Rust toolchain via rustup...${RESET}"
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-    [ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"
+    [ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env" || true
     command -v cargo &>/dev/null && HAVE_CARGO=1
 else
     echo -e "  ${YELLOW}Rust not found — console mode will run Node/Express kernel telemetry + Go observer if available.${RESET}"
@@ -188,14 +199,13 @@ npm run build
 echo -e "  ${GREEN}✓${RESET} dashboard frontend built"
 
 if [ "$HAVE_CARGO" -eq 1 ]; then
-    echo -e "${CYAN}[4/6] Building native Rust engine (aegis-process-engine)...${RESET}"
-    cargo build --release -p process-engine
+    echo -e "${CYAN}[4/6] Building native Rust engine (aegis-process-engine) & desktop app...${RESET}"
+    cargo build --release -p process-engine || true
+    if command -v pkg-config &>/dev/null && pkg-config --exists gtk+-3.0 2>/dev/null; then
+        cargo build --release -p aegis-installer || true
+    fi
     if [ "$MODE" = "desktop" ]; then
-        if ! command -v cargo-tauri &>/dev/null; then
-            cargo install tauri-cli --version "^2.0" --locked || true
-        fi
-        cargo clean --release -p aegis-guard 2>/dev/null || true
-        (cd tauri-app && cargo tauri build --bundles appimage) || cargo build --release -p aegis-guard || true
+        cargo build --release -p aegis-guard || true
     fi
     echo -e "  ${GREEN}✓${RESET} Rust components built"
 else
@@ -205,27 +215,47 @@ fi
 if [ "$HAVE_GO" -eq 1 ] && [ -d "network-observer" ]; then
     echo -e "${CYAN}[5/6] Building Go network packet observer...${RESET}"
     mkdir -p target
-    (cd network-observer && go build -o ../target/aegis-network-observer ./cmd/observer)
+    (cd network-observer && go build -ldflags="-s -w" -o ../target/aegis-network-observer ./cmd/observer)
     echo -e "  ${GREEN}✓${RESET} network-observer built"
 else
     echo -e "${CYAN}[5/6] Skipping Go binary build.${RESET}"
 fi
 
 echo -e "${CYAN}[6/6] Installing binaries, data paths & console CLI (${PROJECT_ROOT})...${RESET}"
-$SUDO install -d -m 750 /var/lib/aegis
+$SUDO install -d -m 755 /var/lib/aegis
 $SUDO install -d -m 1777 /var/lib/aegis/quarantine /var/lib/aegis/canaries /tmp/aegis_guard_data
+$SUDO chmod -R a+rX "$PROJECT_ROOT" || true
 
 [ -f target/release/aegis-process-engine ] && $SUDO install -m 755 target/release/aegis-process-engine /usr/local/bin/
 [ -f target/aegis-network-observer ] && $SUDO install -m 755 target/aegis-network-observer /usr/local/bin/
-[ -f target/release/Aegis-Guard ] && $SUDO install -m 755 target/release/Aegis-Guard /usr/local/bin/aegis-guard-desktop
+[ -f target/release/aegis-installer ] && $SUDO install -m 755 target/release/aegis-installer /usr/local/bin/
 
-# Always install reliable CLI command `aegis-guard`
+DESKTOP_BIN_PATH=""
+for cand in "target/release/Aegis-Guard" "tauri-app/src-tauri/target/release/Aegis-Guard"; do
+    if [ -f "$cand" ]; then
+        DESKTOP_BIN_PATH="$cand"
+        break
+    fi
+done
+if [ -n "$DESKTOP_BIN_PATH" ]; then
+    $SUDO install -m 755 "$DESKTOP_BIN_PATH" /usr/local/bin/aegis-guard-bin
+fi
+
+# Reliable CLI launcher (`aegis-guard`) & Desktop launcher (`aegis-guard-desktop`)
 $SUDO tee /usr/local/bin/aegis-guard > /dev/null << CLI_EOF
 #!/usr/bin/env bash
 cd "$PROJECT_ROOT"
 exec bash "$PROJECT_ROOT/aegis.sh" "\$@"
 CLI_EOF
 $SUDO chmod 755 /usr/local/bin/aegis-guard
+
+$SUDO tee /usr/local/bin/aegis-guard-desktop > /dev/null << DESK_EOF
+#!/usr/bin/env bash
+export WEBKIT_DISABLE_DMABUF_RENDERER="\${WEBKIT_DISABLE_DMABUF_RENDERER:-1}"
+cd "$PROJECT_ROOT"
+exec bash "$PROJECT_ROOT/aegis.sh" --desktop "\$@"
+DESK_EOF
+$SUDO chmod 755 /usr/local/bin/aegis-guard-desktop
 
 if command -v systemctl &>/dev/null && [ -d /etc/systemd/system ]; then
     $SUDO tee /etc/tmpfiles.d/aegis-guard.conf > /dev/null << 'TMPFILES'
@@ -270,28 +300,54 @@ UNIT
     $SUDO systemctl daemon-reload 2>/dev/null || true
 fi
 
-if [ "$MODE" = "desktop" ] && [ -f /usr/local/bin/aegis-guard-desktop ]; then
-    mkdir -p "$HOME/.local/share/applications" "$HOME/.local/share/icons"
-    [ -f tauri-app/src-tauri/icons/icon.png ] && cp tauri-app/src-tauri/icons/icon.png "$HOME/.local/share/icons/aegis-guard.png"
-    cat > "$HOME/.local/share/applications/aegis-guard.desktop" << DESK
+# Install desktop menu entries globally and for the invoking user
+if [ "$MODE" = "desktop" ]; then
+    $SUDO install -d -m 755 /usr/share/applications /usr/share/icons/hicolor/128x128/apps
+    if [ -f tauri-app/src-tauri/icons/icon.png ]; then
+        $SUDO install -m 644 tauri-app/src-tauri/icons/icon.png /usr/share/icons/hicolor/128x128/apps/aegis-guard.png
+    fi
+    $SUDO tee /usr/share/applications/aegis-guard.desktop > /dev/null << 'DESK'
 [Desktop Entry]
 Type=Application
 Name=Aegis-Guard
 Comment=Endpoint Security & Network IDS Suite
 Exec=/usr/local/bin/aegis-guard-desktop
-Icon=$HOME/.local/share/icons/aegis-guard.png
+Icon=aegis-guard
 Terminal=false
 Categories=System;Security;
+StartupNotify=true
 DESK
-    chmod +x "$HOME/.local/share/applications/aegis-guard.desktop"
-    update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
+    $SUDO chmod 644 /usr/share/applications/aegis-guard.desktop
+    $SUDO update-desktop-database /usr/share/applications 2>/dev/null || true
+
+    if [ -n "$REAL_HOME" ] && [ -d "$REAL_HOME" ]; then
+        USER_APP_DIR="$REAL_HOME/.local/share/applications"
+        USER_ICON_DIR="$REAL_HOME/.local/share/icons"
+        mkdir -p "$USER_APP_DIR" "$USER_ICON_DIR"
+        [ -f tauri-app/src-tauri/icons/icon.png ] && cp tauri-app/src-tauri/icons/icon.png "$USER_ICON_DIR/aegis-guard.png"
+        cat > "$USER_APP_DIR/aegis-guard.desktop" << UDESK
+[Desktop Entry]
+Type=Application
+Name=Aegis-Guard
+Comment=Endpoint Security & Network IDS Suite
+Exec=/usr/local/bin/aegis-guard-desktop
+Icon=$USER_ICON_DIR/aegis-guard.png
+Terminal=false
+Categories=System;Security;
+StartupNotify=true
+UDESK
+        chmod +x "$USER_APP_DIR/aegis-guard.desktop"
+        if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+            chown -R "$REAL_USER:$REAL_USER" "$REAL_HOME/.local/share/applications" "$REAL_HOME/.local/share/icons" 2>/dev/null || true
+        fi
+        update-desktop-database "$USER_APP_DIR" 2>/dev/null || true
+    fi
 fi
 
 echo ""
 echo -e "${GREEN}${BOLD}━━━ Aegis-Guard v1.2.0 Installation Complete ━━━${RESET}"
 echo -e "  Console mode (any terminal): ${CYAN}aegis-guard --console${RESET}  (http://127.0.0.1:3000)"
-if [ -f /usr/local/bin/aegis-guard-desktop ]; then
-    echo -e "  Desktop UI:                  ${CYAN}aegis-guard --desktop${RESET}"
-fi
+echo -e "  Desktop UI:                  ${CYAN}aegis-guard --desktop${RESET}  (or aegis-guard-desktop)"
+[ -f /usr/local/bin/aegis-installer ] && echo -e "  GTK3 GUI Installer:          ${CYAN}aegis-installer --gui${RESET}"
 echo -e "  Uninstall:                   ${DIM}sudo bash ${PROJECT_ROOT}/installers/uninstall-linux.sh${RESET}"
 echo ""

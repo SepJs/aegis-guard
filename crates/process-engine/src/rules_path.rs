@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::fs;
 use crate::models::{AnomalyDetail, Confidence, ProcInfo};
 
 const FORBIDDEN_EXEC_DIRS: &[&str] = &[
@@ -155,7 +154,7 @@ impl Default for PathRuleEngine { fn default() -> Self { Self::new() } }
 fn read_environ(pid: u32) -> Option<Vec<String>> {
     #[cfg(target_os = "linux")]
     {
-        let raw = fs::read(format!("/proc/{}/environ", pid)).ok()?;
+        let raw = std::fs::read(format!("/proc/{}/environ", pid)).ok()?;
         Some(raw.split(|&b| b == 0).filter(|s| !s.is_empty()).map(|s| String::from_utf8_lossy(s).into_owned()).collect())
     }
     #[cfg(not(target_os = "linux"))]
@@ -165,4 +164,10 @@ fn read_environ(pid: u32) -> Option<Vec<String>> {
     }
 }
 
-fn truncate(s: &str, max: usize) -> &str { if s.len() <= max { s } else { &s[..max] } }
+fn truncate(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        s.chars().take(max).collect()
+    }
+}

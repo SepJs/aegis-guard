@@ -1,14 +1,15 @@
 {
   "productName": "Aegis-Guard",
   "version": "1.2.0",
-  "identifier": "xrg.vladimir.aegis-guard",
+  "identifier": "io.aegisguard.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://localhost:3000",
     "frontendDist": "../dist"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "Aegis-Guard \u2014 Endpoint Defense",
@@ -42,7 +43,7 @@
       "icons/icon.png",
       "icons/icon.ico"
     ],
-    "copyright": "Copyright \u00a9 Vladimir Unknown",
+    "copyright": "Copyright © 2026 Aegis-Guard Contributors",
     "category": "Security",
     "shortDescription": "Real-time endpoint & network defense",
     "longDescription": "Aegis-Guard is a native endpoint detection and response suite with process lineage monitoring, Shannon entropy forensics, network attack observation, isolated malware sandbox, and cryptographic audit trails.",

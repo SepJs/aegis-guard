@@ -18,6 +18,18 @@ fn quarantine_dir() -> PathBuf {
     }
     #[cfg(not(windows))]
     {
+        if let Ok(dir) = std::env::var("AEGIS_QUARANTINE_DIR") {
+            let p = PathBuf::from(dir);
+            if std::fs::create_dir_all(&p).is_ok() {
+                return p;
+            }
+        }
+        if let Ok(home) = std::env::var("HOME") {
+            let p = PathBuf::from(home).join(".local/share/aegis/quarantine");
+            if std::fs::create_dir_all(&p).is_ok() {
+                return p;
+            }
+        }
         PathBuf::from("/var/lib/aegis/quarantine")
     }
 }

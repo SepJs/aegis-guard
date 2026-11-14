@@ -4,11 +4,20 @@ Aegis-Guard supports **Console Mode** (headless/terminal web server on port `300
 
 ---
 
-## 1. Platform Support Matrix
+## 1. Cross-Platform GTK3 GUI Installer (Recommended)
+
+Launch the visual GTK3 setup wizard from the cloned repository (auto-installs GTK3/Rust build headers on Linux & macOS):
+```bash
+bash install-gui.sh
+```
+Or download the prebuilt GTK3 installer for your OS from **GitHub Releases**:
+- **Windows**: `aegis-installer-gtk-windows-amd64.zip` → extract and double-click `aegis-installer.exe`
+- **Linux**: `aegis-installer-gtk-linux-amd64` → `chmod +x ./aegis-installer-gtk-linux-amd64 && ./aegis-installer-gtk-linux-amd64`
+- **macOS**: `aegis-installer-gtk-macos.tar.gz` → extract and run `./aegis-installer`
 
 | Platform | Console Mode | Desktop Mode | CLI Command Installed |
 |----------|--------------|--------------|-----------------------|
-| **Linux** (Ubuntu, Debian, Fedora, Arch, openSUSE) | `sudo bash installers/install-linux.sh --console --yes` | `sudo bash installers/install-linux.sh --desktop` | `/usr/local/bin/aegis-guard` |
+| **Linux** (Ubuntu, Debian, Fedora, Arch, openSUSE) | `sudo bash installers/install-linux.sh --console --yes` | `sudo bash installers/install-linux.sh --desktop` | `/usr/local/bin/aegis-guard` (`aegis-guard-desktop`) |
 | **macOS** (Apple Silicon & Intel) | `bash installers/install-macos.sh --console --yes` | `bash installers/install-macos.sh --desktop` | `/opt/homebrew/bin/aegis-guard` or `/usr/local/bin/aegis-guard` |
 | **Windows 10 / 11 / Server** | `installers\install-windows.ps1 -ConsoleOnly` | `installers\install-windows.ps1` | `%ProgramFiles%\Aegis-Guard\aegis-guard.cmd` |
 
@@ -113,9 +122,9 @@ npm run build
 make run-console
 ```
 
-The interactive Rust terminal installer (`installer/`) can also be launched with:
+The GTK3 GUI installer (`installer/`) can also be launched directly with Cargo:
 ```bash
-cargo run --manifest-path installer/Cargo.toml
+cargo run --release -p aegis-installer -- --gui
 ```
 
 ---

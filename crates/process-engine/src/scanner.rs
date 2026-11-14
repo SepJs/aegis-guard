@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs, time::Duration};
+use std::{collections::HashMap, time::Duration};
 use anyhow::Result;
 use tokio::sync::mpsc;
 use tracing::{debug, info, trace, warn};
@@ -80,7 +80,7 @@ async fn run_scanner(tx: mpsc::Sender<ProcEvent>, rules: RuleEngine, path_rules:
 fn read_total_cpu_ticks() -> u64 {
     #[cfg(target_os = "linux")]
     {
-        if let Ok(raw) = fs::read_to_string("/proc/stat") {
+        if let Ok(raw) = std::fs::read_to_string("/proc/stat") {
             if let Some(first) = raw.lines().next() {
                 return first.split_whitespace().skip(1).filter_map(|s| s.parse::<u64>().ok()).sum();
             }
@@ -107,7 +107,7 @@ pub fn snapshot_all() -> Result<HashMap<u32, ProcInfo>> {
 #[cfg(target_os = "linux")]
 fn snapshot_linux() -> Result<HashMap<u32, ProcInfo>> {
     let mut map = HashMap::new();
-    for entry in fs::read_dir("/proc")? {
+    for entry in std::fs::read_dir("/proc")? {
         let entry = match entry { Ok(e) => e, Err(_) => continue };
         let pid: u32 = match entry.file_name().to_str().and_then(|s| s.parse().ok()) {
             Some(p) => p, None => continue,
@@ -222,7 +222,65 @@ fn snapshot_windows_tasklist() -> Result<HashMap<u32, ProcInfo>> {
 
 #[cfg(all(not(target_os = "linux"), not(windows)))]
 fn snapshot_fallback() -> Result<HashMap<u32, ProcInfo>> {
-    Ok(HashMap::new())
+    let mut map = HashMap::new();
+    if let Ok(output) = std::process::Command::new("ps")
+        .args(["-axo", "pid=,ppid=,uid=,gid=,state=,rss=,comm="])
+        .output()
+    {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() < 7 {
+                    continue;
+                }
+                let pid: u32 = parts[0].parse().unwrap_or(0);
+                if pid == 0 {
+                    continue;
+                }
+                let ppid: u32 = parts[1].parse().unwrap_or(0);
+                let uid: u32 = parts[2].parse().unwrap_or(0);
+                let gid: u32 = parts[3].parse().unwrap_or(0);
+                let state = parts[4].chars().next().unwrap_or('S');
+                let mem_rss_kb: u64 = parts[5].parse().unwrap_or(0);
+                let exe_path = parts[6..].join(" ");
+                let name = std::path::Path::new(&exe_path)
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or(&exe_path)
+                    .to_string();
+                let state_label = match state {
+                    'R' => "Running",
+                    'Z' => "Zombie",
+                    'T' => "Stopped",
+                    'U' | 'D' => "Disk Wait",
+                    _ => "Sleeping",
+                }
+                .to_string();
+                map.insert(
+                    pid,
+                    ProcInfo {
+                        pid,
+                        ppid,
+                        name: name.clone(),
+                        state,
+                        state_label,
+                        cpu_pct: 0.0,
+                        cpu_ticks: 0,
+                        mem_rss_kb,
+                        threads: 1,
+                        cmdline: vec![exe_path.clone()],
+                        exe: Some(exe_path),
+                        cwd: None,
+                        uid,
+                        gid,
+                        start_time: 0,
+                    },
+                );
+            }
+        }
+    }
+    Ok(map)
 }
 
 #[cfg(target_os = "linux")]
@@ -241,12 +299,12 @@ fn state_char_to_label(c: char) -> String {
 #[cfg(target_os = "linux")]
 fn read_proc_info(pid: u32) -> Option<ProcInfo> {
     let base = format!("/proc/{}", pid);
-    let status_raw = fs::read_to_string(format!("{}/status", base)).ok()?;
+    let status_raw = std::fs::read_to_string(format!("{}/status", base)).ok()?;
     let (name, ppid, uid, gid, state, mem_rss_kb, threads) = parse_status(&status_raw)?;
-    let cmdline_raw = fs::read(format!("{}/cmdline", base)).ok()?;
+    let cmdline_raw = std::fs::read(format!("{}/cmdline", base)).ok()?;
     let cmdline = parse_cmdline(&cmdline_raw);
-    let exe = fs::read_link(format!("{}/exe", base)).ok().map(|p| p.to_string_lossy().into_owned());
-    let cwd = fs::read_link(format!("{}/cwd", base)).ok().map(|p| p.to_string_lossy().into_owned());
+    let exe = std::fs::read_link(format!("{}/exe", base)).ok().map(|p| p.to_string_lossy().into_owned());
+    let cwd = std::fs::read_link(format!("{}/cwd", base)).ok().map(|p| p.to_string_lossy().into_owned());
     let (start_time, cpu_ticks) = read_stat_metrics(pid).unwrap_or((0, 0));
     Some(ProcInfo {
         pid, ppid, name, state, state_label: state_char_to_label(state),
@@ -280,7 +338,7 @@ fn parse_cmdline(raw: &[u8]) -> Vec<String> {
 
 #[cfg(target_os = "linux")]
 fn read_stat_metrics(pid: u32) -> Option<(u64, u64)> {
-    let stat = fs::read_to_string(format!("/proc/{}/stat", pid)).ok()?;
+    let stat = std::fs::read_to_string(format!("/proc/{}/stat", pid)).ok()?;
     let after_comm = stat.rfind(')')?;
     let fields: Vec<&str> = stat[after_comm + 2..].split_whitespace().collect();
     let utime: u64 = fields.get(11)?.parse().ok()?;

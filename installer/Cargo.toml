@@ -2,7 +2,7 @@
 name        = "aegis-installer"
 version     = "1.2.0"
 edition     = "2021"
-description = "Aegis-Guard interactive cross-platform installer"
+description = "Aegis-Guard cross-platform GTK3 GUI & headless CLI installer"
 
 [[bin]]
 name = "aegis-installer"
@@ -12,3 +12,6 @@ path = "src/main.rs"
 anyhow     = "1"
 serde      = { version = "1", features = ["derive"] }
 serde_json = "1"
+gtk        = { version = "0.18", features = ["v3_24"] }
+gdk-pixbuf = "0.18"
+glib       = "0.18"

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Install Aegis-Guard (GTK GUI)
+Comment=Launch the Cross-Platform Aegis-Guard v1.2.0 Graphical Installer
+Exec=bash -c 'DIR="$(cd "$(dirname "%k")/.." && pwd)"; exec bash "$DIR/install-gui.sh"'
+Icon=system-software-install
+Terminal=true
+Categories=System;Security;
+StartupNotify=true
