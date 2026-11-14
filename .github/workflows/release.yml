@@ -262,6 +262,7 @@ jobs:
         uses: msys2/setup-msys2@v2
         with:
           msystem: mingw64
+          path-type: inherit
           update: true
           install: >-
             mingw-w64-x86_64-gtk3
@@ -299,7 +300,10 @@ jobs:
       - name: Build Self-Contained Windows GTK3 GUI Installer (mingw64)
         shell: msys2 {0}
         run: |
-          export PATH="$HOME/.cargo/bin:/mingw64/bin:$PATH"
+          CARGO_UNIX=$(cygpath -u "${CARGO_HOME:-$USERPROFILE/.cargo}/bin")
+          export PATH="/mingw64/bin:$CARGO_UNIX:$PATH"
+          export PKG_CONFIG_PATH="/mingw64/lib/pkgconfig"
+          cargo --version
           cargo build --release -p aegis-installer --target x86_64-pc-windows-gnu
           rm -rf pkg-win-gtk
           mkdir -p pkg-win-gtk/share/glib-2.0/schemas pkg-win-gtk/lib

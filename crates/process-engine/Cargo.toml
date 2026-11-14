@@ -23,6 +23,3 @@ tracing-subscriber = { workspace = true }
 chrono             = { workspace = true }
 uuid               = { workspace = true }
 ipc                = { path = "../ipc" }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-procfs             = "0.17"

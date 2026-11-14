@@ -167,7 +167,7 @@ impl RuleEngine {
     }
 
     /// PAR-010: Living-Off-The-Land binary abuse (LOLBins)
-    fn par_010(&self, child: &ProcInfo, child_name: &str, parent_name: &str, ancestors: &[u32]) -> Option<AnomalyDetail> {
+    fn par_010(&self, _child: &ProcInfo, child_name: &str, parent_name: &str, ancestors: &[u32]) -> Option<AnomalyDetail> {
         if !self.lolbins.contains(child_name) { return None; }
         let risky_parent = self.shells.contains(parent_name) || self.office.contains(parent_name) || self.browsers.contains(parent_name);
         if !risky_parent { return None; }

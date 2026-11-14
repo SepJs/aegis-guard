@@ -581,7 +581,8 @@ fn install_launchers_and_shortcuts(
     {
         use std::os::unix::fs::PermissionsExt;
         let bin_dir = if env_info.is_elevated {
-            let _ = Command::new("chmod").args(["-R", "a+rX", &source_dir.to_string_lossy()]).status();
+            let src_str = source_dir.to_string_lossy();
+            let _ = Command::new("chmod").args(["-R", "a+rX", src_str.as_ref()]).status();
             PathBuf::from("/usr/local/bin")
         } else {
             resolve_real_home()
@@ -659,14 +660,16 @@ fn install_launchers_and_shortcuts(
     #[cfg(windows)]
     {
         if env_info.is_elevated {
+            let src_str = source_dir.to_string_lossy();
             let _ = Command::new("icacls")
-                .args([&source_dir.to_string_lossy(), "/grant", "Users:(OI)(CI)M", "/T", "/Q"])
+                .args([src_str.as_ref(), "/grant", "Users:(OI)(CI)M", "/T", "/Q"])
                 .status();
             if let Ok(pd) = std::env::var("ProgramData") {
                 let data_root = PathBuf::from(pd).join("Aegis-Guard");
                 let _ = std::fs::create_dir_all(&data_root);
+                let data_str = data_root.to_string_lossy();
                 let _ = Command::new("icacls")
-                    .args([&data_root.to_string_lossy(), "/grant", "Users:(OI)(CI)M", "/T", "/Q"])
+                    .args([data_str.as_ref(), "/grant", "Users:(OI)(CI)M", "/T", "/Q"])
                     .status();
             }
         }
@@ -702,7 +705,7 @@ fn install_launchers_and_shortcuts(
                 ico_line
             );
             let _ = Command::new("powershell")
-                .args(["-NoProfile", "-Command", &ps_script])
+                .args(["-NoProfile", "-Command", ps_script.as_str()])
                 .status();
             emit_log(&tx, "Created Windows Desktop shortcut.");
         }
@@ -760,8 +763,10 @@ fn install_unix_desktop_entry(
             let _ = std::fs::set_permissions(&desktop_file, std::fs::Permissions::from_mode(0o755));
             if is_elevated && app_dir.starts_with("/home/") {
                 if let Ok(su) = std::env::var("SUDO_USER") {
+                    let owner = format!("{su}:{su}");
+                    let desk = desktop_file.to_string_lossy();
                     let _ = Command::new("chown")
-                        .args([&format!("{su}:{su}"), &desktop_file.to_string_lossy()])
+                        .args([owner.as_str(), desk.as_ref()])
                         .status();
                 }
             }
@@ -829,7 +834,8 @@ pub fn launch_installed_app(target: Option<PathBuf>, install_dir: &Path) {
             #[cfg(windows)]
             {
                 if bin.extension().and_then(|s| s.to_str()) == Some("cmd") {
-                    let _ = Command::new("cmd").args(["/C", "start", "", &bin.to_string_lossy()]).spawn();
+                    let bin_str = bin.to_string_lossy();
+                    let _ = Command::new("cmd").args(["/C", "start", "", bin_str.as_ref()]).spawn();
                 } else {
                     let _ = Command::new(bin).spawn();
                 }
@@ -852,7 +858,8 @@ pub fn launch_installed_app(target: Option<PathBuf>, install_dir: &Path) {
     {
         let cmd = install_dir.join("Aegis-Guard-Desktop.cmd");
         if cmd.is_file() {
-            let _ = Command::new("cmd").args(["/C", "start", "", &cmd.to_string_lossy()]).spawn();
+            let cmd_str = cmd.to_string_lossy();
+            let _ = Command::new("cmd").args(["/C", "start", "", cmd_str.as_ref()]).spawn();
         }
     }
 }

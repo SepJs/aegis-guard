@@ -220,19 +220,12 @@ fn build_installer_window(app: &gtk::Application, default_mode: InstallMode) {
 
     // ── Toolchain Badges ─────────────────────────────────────────────────────
     let badge_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    badge_row.pack_start(
-        &make_badge(
-            if env_info.has_node {
-                &format!("Node {}", env_info.node_version)
-            } else {
-                "Node.js Missing (Required)"
-            },
-            env_info.has_node,
-        ),
-        false,
-        false,
-        0,
-    );
+    let node_badge = if env_info.has_node {
+        format!("Node {}", env_info.node_version)
+    } else {
+        "Node.js Missing (Required)".to_string()
+    };
+    badge_row.pack_start(&make_badge(&node_badge, env_info.has_node), false, false, 0);
     badge_row.pack_start(
         &make_badge(
             if env_info.has_cargo {
