@@ -25,4 +25,30 @@ impl SafetyBoundary {
     }
 }
 
-fn proc_exists(pid: u32) -> bool { std::path::Path::new(&format!("/proc/{}", pid)).exists() }
+fn proc_exists(pid: u32) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        std::path::Path::new(&format!("/proc/{}", pid)).exists()
+    }
+    #[cfg(all(unix, not(target_os = "linux")))]
+    {
+        std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+    #[cfg(windows)]
+    {
+        std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {}", pid)])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
+            .unwrap_or(false)
+    }
+    #[cfg(all(not(unix), not(windows)))]
+    {
+        let _ = pid;
+        false
+    }
+}

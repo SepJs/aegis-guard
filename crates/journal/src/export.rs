@@ -9,7 +9,11 @@ pub fn to_markdown(incidents: &[ThreatIncident], title: &str) -> String {
     for inc in incidents {
         let status = if inc.resolved { "✅ Resolved" } else { "🔴 Open" };
         let sev_emoji = match inc.severity {
-            crate::models::Severity::High => "🔴 HIGH", crate::models::Severity::Medium => "🟡 MEDIUM", crate::models::Severity::Low => "⚪ LOW",
+            crate::models::Severity::Critical => "🚨 CRITICAL",
+            crate::models::Severity::High => "🔴 HIGH",
+            crate::models::Severity::Medium => "🟡 MEDIUM",
+            crate::models::Severity::Low => "⚪ LOW",
+            crate::models::Severity::Informational => "🔵 INFO",
         };
         out.push_str(&format!("## {} — {}\n\n", inc.rule, inc.process));
         out.push_str("| Field | Value |\n|---|---|\n");
@@ -27,7 +31,8 @@ pub fn to_markdown(incidents: &[ThreatIncident], title: &str) -> String {
             let chain: Vec<String> = inc.ancestors.iter().map(|p| p.to_string()).collect();
             out.push_str(&format!("**Ancestor chain:** {}\n\n", chain.join(" → ")));
         }
-        out.push_str(&format!("_Integrity digest: `{}`_\n\n---\n\n", &inc.digest[..16]));
+        let digest_preview = &inc.digest[..16.min(inc.digest.len())];
+        out.push_str(&format!("_Integrity digest: `{}`_\n\n---\n\n", digest_preview));
     }
     out
 }

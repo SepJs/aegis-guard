@@ -52,8 +52,50 @@ pub async fn kill_process(pid: u32, name: String) -> Result<ActionResult, Respon
         ActionResult::success(pid, ActionKind::Kill, format!("Process '{}' (pid {}) terminated forcefully on Windows.", name, pid))
     }
 
-    #[cfg(all(not(target_os = "linux"), not(windows)))]
+    #[cfg(all(unix, not(target_os = "linux")))]
     {
+        info!(pid, name = %name, "sending SIGTERM");
+        let term = tokio::process::Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .output()
+            .await
+            .map_err(|e| ResponseError::ExecutionFailed(format!("kill -TERM execution failed: {}", e)))?;
+        if !term.status.success() {
+            let stderr = String::from_utf8_lossy(&term.stderr);
+            return Err(ResponseError::ExecutionFailed(format!("SIGTERM failed for pid {}: {}", pid, stderr.trim())));
+        }
+
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(GRACE_PERIOD_SECS);
+        loop {
+            tokio::time::sleep(Duration::from_millis(POLL_INTERVAL_MS)).await;
+            if !proc_exists(pid) {
+                info!(pid, name = %name, "process exited after SIGTERM");
+                return ActionResult::success(pid, ActionKind::Kill, format!("Process '{}' (pid {}) terminated cleanly after SIGTERM.", name, pid));
+            }
+            if tokio::time::Instant::now() >= deadline { break; }
+        }
+
+        warn!(pid, name = %name, "process did not exit after {}s — sending SIGKILL", GRACE_PERIOD_SECS);
+        let kill_out = tokio::process::Command::new("kill")
+            .args(["-KILL", &pid.to_string()])
+            .output()
+            .await
+            .map_err(|e| ResponseError::ExecutionFailed(format!("kill -KILL execution failed: {}", e)))?;
+        if !kill_out.status.success() && proc_exists(pid) {
+            let stderr = String::from_utf8_lossy(&kill_out.stderr);
+            return Err(ResponseError::ExecutionFailed(format!("SIGKILL failed for pid {}: {}", pid, stderr.trim())));
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        if proc_exists(pid) {
+            return Err(ResponseError::ExecutionFailed(format!("Process pid {} still alive after SIGKILL.", pid)));
+        }
+        ActionResult::success(pid, ActionKind::Kill, format!("Process '{}' (pid {}) did not respond to SIGTERM. Forcefully terminated with SIGKILL after {}s grace period.", name, pid, GRACE_PERIOD_SECS))
+    }
+
+    #[cfg(all(not(unix), not(windows)))]
+    {
+        let _ = (pid, name);
         Err(ResponseError::ExecutionFailed("Unsupported OS for process termination".into()))
     }
 }
@@ -63,6 +105,14 @@ fn proc_exists(pid: u32) -> bool {
     {
         std::path::Path::new(&format!("/proc/{}", pid)).exists()
     }
+    #[cfg(all(unix, not(target_os = "linux")))]
+    {
+        std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
     #[cfg(windows)]
     {
         std::process::Command::new("tasklist")
@@ -71,7 +121,7 @@ fn proc_exists(pid: u32) -> bool {
             .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
             .unwrap_or(false)
     }
-    #[cfg(all(not(target_os = "linux"), not(windows)))]
+    #[cfg(all(not(unix), not(windows)))]
     {
         let _ = pid;
         false

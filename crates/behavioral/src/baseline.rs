@@ -83,6 +83,7 @@ impl BehaviorEngine {
     pub fn baseline_count(&self) -> usize { self.baselines.read().unwrap().len() }
 }
 
+#[cfg(target_os = "linux")]
 fn count_process_connections(pid: u32) -> u32 {
     let inode_set = collect_proc_fd_inodes(pid);
     if inode_set.is_empty() { return 0; }
@@ -99,6 +100,7 @@ fn count_process_connections(pid: u32) -> u32 {
     count
 }
 
+#[cfg(target_os = "linux")]
 fn collect_proc_fd_inodes(pid: u32) -> std::collections::HashSet<u64> {
     let mut set = std::collections::HashSet::new();
     let Ok(entries) = fs::read_dir(format!("/proc/{}/fd", pid)) else { return set; };
@@ -114,6 +116,7 @@ fn collect_proc_fd_inodes(pid: u32) -> std::collections::HashSet<u64> {
     set
 }
 
+#[cfg(target_os = "linux")]
 fn read_cpu_pct(pid: u32) -> f64 {
     let Ok(stat) = fs::read_to_string(format!("/proc/{}/stat", pid)) else { return 0.0 };
     let after_comm = stat.rfind(')').unwrap_or(0);

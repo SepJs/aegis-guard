@@ -122,8 +122,8 @@ jobs:
           cp release-assets/aegis-network-observer-linux-amd64 bundle-linux-amd64/target/aegis-network-observer
           cp release-assets/aegis-installer-gtk-linux-amd64 bundle-linux-amd64/target/release/aegis-installer
           tar -czf "release-assets/aegis-guard_${VER}_linux-amd64_portable.tar.gz" \
-            --exclude='bundle-linux-amd64/tauri-app/node_modules' \
-            --exclude='bundle-linux-amd64/tauri-app/src-tauri/target' \
+            --exclude='tauri-app/node_modules' \
+            --exclude='tauri-app/src-tauri/target' \
             -C bundle-linux-amd64 .
 
           # Linux ARM64 (aarch64) full bundle
@@ -133,8 +133,8 @@ jobs:
           cp release-assets/aegis-process-engine-linux-arm64 bundle-linux-arm64/target/release/aegis-process-engine
           cp release-assets/aegis-network-observer-linux-arm64 bundle-linux-arm64/target/aegis-network-observer
           tar -czf "release-assets/aegis-guard_${VER}_linux-arm64_portable.tar.gz" \
-            --exclude='bundle-linux-arm64/tauri-app/node_modules' \
-            --exclude='bundle-linux-arm64/tauri-app/src-tauri/target' \
+            --exclude='tauri-app/node_modules' \
+            --exclude='tauri-app/src-tauri/target' \
             -C bundle-linux-arm64 .
 
           # Lightweight Console-only tarball
@@ -224,8 +224,8 @@ jobs:
           cp release-assets/aegis-network-observer-darwin-universal bundle-darwin/target/aegis-network-observer
           cp target/release/aegis-installer bundle-darwin/target/release/aegis-installer
           tar -czf "release-assets/aegis-guard_${VER}_macos-universal_portable.tar.gz" \
-            --exclude='bundle-darwin/tauri-app/node_modules' \
-            --exclude='bundle-darwin/tauri-app/src-tauri/target' \
+            --exclude='tauri-app/node_modules' \
+            --exclude='tauri-app/src-tauri/target' \
             -C bundle-darwin .
 
           test -n "$(ls -1 release-assets 2>/dev/null)"
@@ -303,6 +303,11 @@ jobs:
           CARGO_UNIX=$(cygpath -u "${CARGO_HOME:-$USERPROFILE/.cargo}/bin")
           export PATH="/mingw64/bin:$CARGO_UNIX:$PATH"
           export PKG_CONFIG_PATH="/mingw64/lib/pkgconfig"
+          export PKG_CONFIG_ALLOW_CROSS=1
+          export PKG_CONFIG_ALLOW_CROSS_x86_64_pc_windows_gnu=1
+          export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="/mingw64/bin/gcc.exe"
+          export CC_x86_64_pc_windows_gnu="/mingw64/bin/gcc.exe"
+          export AR_x86_64_pc_windows_gnu="/mingw64/bin/ar.exe"
           cargo --version
           cargo build --release -p aegis-installer --target x86_64-pc-windows-gnu
           rm -rf pkg-win-gtk
@@ -310,7 +315,7 @@ jobs:
           cp target/x86_64-pc-windows-gnu/release/aegis-installer.exe pkg-win-gtk/
           cp tauri-app/src-tauri/icons/icon.ico pkg-win-gtk/
           ldd pkg-win-gtk/aegis-installer.exe | grep -i '/mingw64/bin/' | awk '{print $3}' | sort -u | xargs -r -I{} cp -u "{}" pkg-win-gtk/
-          for dll in /mingw64/bin/librsvg-*.dll /mingw64/bin/libxml2-*.dll /mingw64/bin/libgdk_pixbuf-*.dll /mingw64/bin/libbrotli*.dll; do
+          for dll in /mingw64/bin/librsvg-*.dll /mingw64/bin/libxml2-*.dll /mingw64/bin/libgdk_pixbuf-*.dll /mingw64/bin/libbrotli*.dll /mingw64/bin/gspawn-win64-helper*.exe; do
             [ -f "$dll" ] && cp -u "$dll" pkg-win-gtk/
           done
           cp -r /mingw64/share/glib-2.0/schemas/* pkg-win-gtk/share/glib-2.0/schemas/
@@ -325,11 +330,19 @@ jobs:
             fi
           fi
 
-      - name: Build Tauri Desktop Bundles (x64 NSIS/.msi + arm64 binary)
+      - name: Build Tauri Desktop Bundles (x64 NSIS/.msi + optional arm64 binary)
         shell: pwsh
         run: |
           npm --prefix tauri-app run tauri build -- --target x86_64-pc-windows-msvc --bundles nsis,msi
-          npm --prefix tauri-app run tauri build -- --target aarch64-pc-windows-msvc --no-bundle
+          $arm64Cl = Get-ChildItem "${env:ProgramFiles(x86)}\Microsoft Visual Studio" -Recurse -Filter cl.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match 'Hostx64\\arm64\\cl\.exe' } |
+            Select-Object -First 1
+          if ($arm64Cl) {
+            Write-Host "Found MSVC ARM64 compiler ($($arm64Cl.FullName)); building windows-arm64 desktop binary..."
+            npm --prefix tauri-app run tauri build -- --target aarch64-pc-windows-msvc --no-bundle
+          } else {
+            Write-Warning "MSVC ARM64 C/C++ compiler not preinstalled on runner; skipping native arm64 desktop binary (arm64 process-engine + network-observer will still be packaged)."
+          }
 
       - name: Collect Windows Bundles & Package Portable ZIPs
         shell: pwsh
@@ -343,13 +356,18 @@ jobs:
             Where-Object { $_.FullName -match "bundle" } |
             ForEach-Object { Copy-Item $_.FullName -Destination release-assets/ -Force }
 
-          if (-not (Get-ChildItem release-assets -File -Include *.exe,*.msi)) {
+          $winBundles = Get-ChildItem -Path release-assets -File | Where-Object { $_.Extension -in '.exe', '.msi' }
+          if (-not $winBundles) {
             throw 'No Windows installer bundles were produced.'
           }
 
           $win64 = "bundle-win-amd64"
           New-Item -ItemType Directory -Force -Path "$win64" | Out-Null
-          Copy-Item target/x86_64-pc-windows-msvc/release/Aegis-Guard.exe "$win64/" -Force
+          $win64App = Get-ChildItem -Path target, tauri-app/src-tauri/target -Recurse -File -Filter Aegis-Guard.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match 'x86_64-pc-windows-msvc[\\/]release' -and $_.FullName -notmatch 'bundle' } |
+            Select-Object -First 1
+          if (-not $win64App) { throw 'Could not locate x86_64-pc-windows-msvc release Aegis-Guard.exe' }
+          Copy-Item $win64App.FullName "$win64/Aegis-Guard.exe" -Force
           Copy-Item release-assets/aegis-process-engine-windows-amd64.exe "$win64/aegis-process-engine.exe" -Force
           Copy-Item release-assets/aegis-network-observer-windows-amd64.exe "$win64/aegis-network-observer.exe" -Force
           Copy-Item -Recurse dist, installers, server.ts, server-security.ts, package.json "$win64/" -Force
@@ -357,7 +375,12 @@ jobs:
 
           $winArm = "bundle-win-arm64"
           New-Item -ItemType Directory -Force -Path "$winArm" | Out-Null
-          Copy-Item target/aarch64-pc-windows-msvc/release/Aegis-Guard.exe "$winArm/" -Force
+          $winArmApp = Get-ChildItem -Path target, tauri-app/src-tauri/target -Recurse -File -Filter Aegis-Guard.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match 'aarch64-pc-windows-msvc[\\/]release' -and $_.FullName -notmatch 'bundle' } |
+            Select-Object -First 1
+          if ($winArmApp) {
+            Copy-Item $winArmApp.FullName "$winArm/Aegis-Guard.exe" -Force
+          }
           Copy-Item release-assets/aegis-process-engine-windows-arm64.exe "$winArm/aegis-process-engine.exe" -Force
           Copy-Item release-assets/aegis-network-observer-windows-arm64.exe "$winArm/aegis-network-observer.exe" -Force
           Copy-Item -Recurse dist, installers, server.ts, server-security.ts, package.json "$winArm/" -Force

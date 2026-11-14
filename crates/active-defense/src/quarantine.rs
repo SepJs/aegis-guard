@@ -3,7 +3,9 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use once_cell::sync::Lazy;
 use tokio::process::Command;
-use tracing::{info, warn};
+use tracing::info;
+#[cfg(target_os = "linux")]
+use tracing::warn;
 
 use crate::models::{ActionKind, ActionResult, ResponseError};
 
@@ -30,7 +32,11 @@ fn quarantine_dir() -> PathBuf {
                 return p;
             }
         }
-        PathBuf::from("/var/lib/aegis/quarantine")
+        let var_dir = PathBuf::from("/var/lib/aegis/quarantine");
+        if std::fs::create_dir_all(&var_dir).is_ok() {
+            return var_dir;
+        }
+        std::env::temp_dir().join("aegis-guard").join("quarantine")
     }
 }
 
@@ -43,7 +49,7 @@ pub async fn quarantine_process(pid: u32, name: String) -> Result<ActionResult, 
         }
     }
 
-    let mut isolation_notes = Vec::new();
+    let mut isolation_notes: Vec<&'static str> = Vec::new();
 
     #[cfg(target_os = "linux")]
     {
@@ -94,6 +100,19 @@ pub async fn quarantine_process(pid: u32, name: String) -> Result<ActionResult, 
         isolation_notes.push("Windows firewall block (in+out)");
     }
 
+    #[cfg(all(unix, not(target_os = "linux")))]
+    {
+        if let Ok(o) = Command::new("kill")
+            .args(["-STOP", &pid.to_string()])
+            .output()
+            .await
+        {
+            if o.status.success() {
+                isolation_notes.push("SIGSTOP suspend");
+            }
+        }
+    }
+
     let marker = quarantine_dir().join(format!("{}.quarantine", pid));
     std::fs::write(&marker, format!("{}\n{}\n{}\n", pid, name, isolation_notes.join(",")))
         .map_err(|e| ResponseError::ExecutionFailed(e.to_string()))?;
@@ -135,6 +154,14 @@ pub async fn lift_quarantine(pid: u32) -> Result<ActionResult, ResponseError> {
         let _ = Command::new("netsh")
             .args(["advfirewall", "firewall", "delete", "rule", &format!("name={}-in", rule_name)])
             .output().await;
+    }
+
+    #[cfg(all(unix, not(target_os = "linux")))]
+    {
+        let _ = Command::new("kill")
+            .args(["-CONT", &pid.to_string()])
+            .output()
+            .await;
     }
 
     let marker = quarantine_dir().join(format!("{}.quarantine", pid));

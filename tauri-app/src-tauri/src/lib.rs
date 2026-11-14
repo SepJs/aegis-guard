@@ -52,16 +52,20 @@ fn ensure_socket_dir_permissions(socket_path: &str) -> String {
         .parent()
         .unwrap_or(std::path::Path::new("/run/aegis"));
 
-    if !dir.exists() && std::fs::create_dir_all(dir).is_err() {
-        let fallback = std::env::var("XDG_RUNTIME_DIR")
+    let fallback = || {
+        std::env::var("XDG_RUNTIME_DIR")
             .map(|r| PathBuf::from(r).join("aegis-proc.sock"))
-            .unwrap_or_else(|_| std::env::temp_dir().join("aegis-proc.sock"));
+            .unwrap_or_else(|_| std::env::temp_dir().join("aegis-proc.sock"))
+    };
+
+    if !dir.exists() && std::fs::create_dir_all(dir).is_err() {
+        let fb = fallback();
         warn!(
-            "Cannot access {}, using user socket fallback {}",
+            "Cannot create {}, using user socket fallback {}",
             dir.display(),
-            fallback.display()
+            fb.display()
         );
-        return fallback.to_string_lossy().to_string();
+        return fb.to_string_lossy().to_string();
     }
 
     #[cfg(unix)]
@@ -69,7 +73,28 @@ fn ensure_socket_dir_permissions(socket_path: &str) -> String {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o1777));
     }
-    socket_path.to_string()
+
+    let probe = dir.join(format!(".aegis-write-probe-{}", std::process::id()));
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&probe)
+    {
+        Ok(_) => {
+            let _ = std::fs::remove_file(&probe);
+            socket_path.to_string()
+        }
+        Err(_) => {
+            let fb = fallback();
+            warn!(
+                "Socket directory {} is not writable, using fallback {}",
+                dir.display(),
+                fb.display()
+            );
+            fb.to_string_lossy().to_string()
+        }
+    }
 }
 
 pub fn run() {
